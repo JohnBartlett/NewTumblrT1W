@@ -1,0 +1,20 @@
+{
+  "name": "Tumblr T3",
+  "short_name": "TumblrT3",
+  "description": "A modern Tumblr client built with React and TypeScript",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0ea5e9",
+  "icons": [],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "categories": ["social", "lifestyle"],
+  "screenshots": [],
+  "orientation": "any",
+  "lang": "en-US",
+  "_comment": "TODO: Add PWA icons to /public/ directory: icon-192x192.png, icon-512x512.png, icon-96x96.png. Recommended tool: https://realfavicongenerator.net/"
+}
+
+
+

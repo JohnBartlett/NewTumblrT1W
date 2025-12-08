@@ -7,6 +7,7 @@ import { VersionBadge } from '@/components/ui/VersionBadge';
 import { Container } from '@/components/layouts';
 import { useAuth } from '@/hooks/queries/useAuth';
 import { getRecentBlogs, getRemainingBlogs, clearBlogHistory, loadBlogHistoryFromDatabase, type BlogVisit } from '@/utils/blogHistory';
+import { BlogStats } from './BlogStats';
 
 const RECENT_BLOGS_LIMIT = 20;
 const INFINITE_SCROLL_PAGE_SIZE = 20;
@@ -14,50 +15,50 @@ const INFINITE_SCROLL_PAGE_SIZE = 20;
 export default function Dashboard() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  
+
   const [recentBlogs, setRecentBlogs] = useState<BlogVisit[]>([]);
   const [remainingBlogs, setRemainingBlogs] = useState<BlogVisit[]>([]);
   const [displayedBlogs, setDisplayedBlogs] = useState<BlogVisit[]>([]);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  
+
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [isInView, setIsInView] = useState(false);
 
   // Load blog history on mount and when returning to dashboard
   useEffect(() => {
     loadBlogHistory();
-    
+
     // Reload history when window gains focus (in case blogs were visited in other tabs)
     const handleFocus = () => loadBlogHistory();
     window.addEventListener('focus', handleFocus);
-    
+
     return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
   const loadBlogHistory = async () => {
     try {
       // Load from database (with localStorage fallback)
-      await loadBlogHistoryFromDatabase();
-      
+      await loadBlogHistoryFromDatabase(currentUser?.id);
+
       // Get the loaded history
       const recent = getRecentBlogs(RECENT_BLOGS_LIMIT);
       const remaining = getRemainingBlogs(RECENT_BLOGS_LIMIT);
-      
+
       setRecentBlogs(recent);
       setRemainingBlogs(remaining);
       setDisplayedBlogs(remaining.slice(0, INFINITE_SCROLL_PAGE_SIZE));
       setPage(0);
       setHasMore(remaining.length > INFINITE_SCROLL_PAGE_SIZE);
-      
+
       console.log(`[Dashboard] Loaded ${recent.length} recent blogs, ${remaining.length} remaining`);
     } catch (error) {
       console.error('[Dashboard] Error loading blog history:', error);
-      
+
       // Fallback to localStorage only
       const recent = getRecentBlogs(RECENT_BLOGS_LIMIT);
       const remaining = getRemainingBlogs(RECENT_BLOGS_LIMIT);
-      
+
       setRecentBlogs(recent);
       setRemainingBlogs(remaining);
       setDisplayedBlogs(remaining.slice(0, INFINITE_SCROLL_PAGE_SIZE));
@@ -98,7 +99,7 @@ export default function Dashboard() {
     const start = nextPage * INFINITE_SCROLL_PAGE_SIZE;
     const end = start + INFINITE_SCROLL_PAGE_SIZE;
     const newBlogs = remainingBlogs.slice(start, end);
-    
+
     if (newBlogs.length > 0) {
       setDisplayedBlogs(prev => [...prev, ...newBlogs]);
       setPage(nextPage);
@@ -111,7 +112,7 @@ export default function Dashboard() {
 
   const handleClearHistory = async () => {
     if (window.confirm('Clear all blog history? This cannot be undone.')) {
-      await clearBlogHistory();
+      await clearBlogHistory(currentUser?.id);
       await loadBlogHistory();
     }
   };
@@ -126,7 +127,7 @@ export default function Dashboard() {
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
-    
+
     if (minutes < 1) return 'Just now';
     if (minutes < 60) return `${minutes}m ago`;
     if (hours < 24) return `${hours}h ago`;
@@ -146,7 +147,7 @@ export default function Dashboard() {
                 Sign in to see your recently viewed blogs and explore Tumblr.
               </p>
               <div className="flex justify-center space-x-4">
-                <Button 
+                <Button
                   variant="outline"
                   onClick={() => navigate({ to: '/auth', search: { mode: 'login' } })}
                 >
@@ -232,7 +233,7 @@ export default function Dashboard() {
                         exit={{ opacity: 0, scale: 0.9 }}
                         transition={{ delay: index * 0.02 }}
                       >
-                        <Card 
+                        <Card
                           className="group cursor-pointer overflow-hidden transition-all hover:scale-[1.02] hover:shadow-lg"
                           onClick={() => handleBlogClick(blog.blogName)}
                         >
@@ -253,7 +254,7 @@ export default function Dashboard() {
                                 </div>
                               )}
                             </div>
-                            
+
                             {/* Blog Info */}
                             <div className="p-3">
                               <h3 className="truncate font-semibold text-gray-900 dark:text-white">
@@ -266,6 +267,7 @@ export default function Dashboard() {
                                 <span>{formatLastVisited(blog.lastVisited)}</span>
                                 <span>{blog.visitCount}x</span>
                               </div>
+                              <BlogStats blogName={blog.blogName} />
                             </div>
                           </CardContent>
                         </Card>
@@ -295,7 +297,7 @@ export default function Dashboard() {
                         exit={{ opacity: 0, y: -20 }}
                         transition={{ delay: index * 0.01 }}
                       >
-                        <Card 
+                        <Card
                           className="group cursor-pointer transition-all hover:scale-[1.01] hover:shadow-md"
                           onClick={() => handleBlogClick(blog.blogName)}
                         >
@@ -317,7 +319,7 @@ export default function Dashboard() {
                                   </div>
                                 )}
                               </div>
-                              
+
                               {/* Info */}
                               <div className="min-w-0 flex-1">
                                 <h3 className="truncate font-semibold text-gray-900 dark:text-white">
@@ -327,11 +329,14 @@ export default function Dashboard() {
                                   @{blog.blogName}
                                 </p>
                               </div>
-                              
+
                               {/* Meta */}
                               <div className="flex flex-col items-end text-xs text-gray-500 dark:text-gray-500">
                                 <span>{formatLastVisited(blog.lastVisited)}</span>
                                 <span className="mt-1">{blog.visitCount} visit{blog.visitCount !== 1 ? 's' : ''}</span>
+                                <div className="mt-1">
+                                  <BlogStats blogName={blog.blogName} />
+                                </div>
                               </div>
                             </div>
                           </CardContent>
@@ -357,7 +362,7 @@ export default function Dashboard() {
           </>
         )}
       </div>
-      
+
       <VersionBadge />
     </Container>
   );

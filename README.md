@@ -101,48 +101,6 @@ A modern, feature-rich Tumblr client built with React, TypeScript, and Vite, fol
 - **Prettier** - Code formatting
 - **Husky** - Git hooks
 
-## 🛠️ Installation
-
-### Prerequisites
-- **Node.js** 18+ and npm
-- **PostgreSQL** 14+ (local or cloud instance)
-
-### Setup Steps
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd NewTumblrT3
-
-# Install dependencies
-npm install
-
-# Set up PostgreSQL database
-# On macOS:
-brew install postgresql@15
-brew services start postgresql@15
-createdb tumblr_dev
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your database credentials:
-# DATABASE_URL="postgresql://postgres:password@localhost:5432/tumblr_dev"
-
-# Run database migrations
-npm run db:migrate
-
-# Seed database with test data
-npm run db:seed
-
-# Start development server
-npm run dev
-```
-
-### Database Test Accounts
-After seeding, you can login with:
-- **Admin**: `admin@tumblr.local` / `Admin123!`
-- **Test User**: `testuser` / `Test123!`
-- **Moderator**: `moderator` / `Mod123!`
 
 ## 📝 Available Scripts
 

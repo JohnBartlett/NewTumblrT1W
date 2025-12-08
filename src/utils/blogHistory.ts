@@ -34,7 +34,7 @@ function getApiUrl(): string {
  */
 function migrateAvatarUrl(avatarUrl?: string): string | undefined {
   if (!avatarUrl) return undefined;
-  
+
   // Check if it's an old direct Tumblr API URL
   if (avatarUrl.startsWith('https://api.tumblr.com/v2/blog/')) {
     const API_URL = getApiUrl();
@@ -46,7 +46,7 @@ function migrateAvatarUrl(avatarUrl?: string): string | undefined {
       return newUrl;
     }
   }
-  
+
   return avatarUrl;
 }
 
@@ -57,9 +57,9 @@ export function getBlogHistory(): BlogVisit[] {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return [];
-    
+
     let history = JSON.parse(stored) as BlogVisit[];
-    
+
     // Migrate old avatar URLs to use backend proxy
     let needsUpdate = false;
     history = history.map(visit => {
@@ -73,13 +73,13 @@ export function getBlogHistory(): BlogVisit[] {
         avatar: newAvatar
       };
     });
-    
+
     // Save migrated history back to localStorage
     if (needsUpdate) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
       console.log('[BlogHistory] Migrated avatar URLs to use backend proxy');
     }
-    
+
     // Sort by last visited (most recent first)
     return history.sort((a, b) => b.lastVisited - a.lastVisited);
   } catch (error) {
@@ -90,13 +90,14 @@ export function getBlogHistory(): BlogVisit[] {
 
 /**
  * Get current user ID from localStorage (assumes user is logged in)
+ * @deprecated Use auth context instead
  */
 function getCurrentUserId(): string | null {
   try {
-    const userStr = localStorage.getItem('currentUser');
+    const userStr = localStorage.getItem('auth');
     if (!userStr) return null;
-    const user = JSON.parse(userStr);
-    return user?.id || null;
+    const auth = JSON.parse(userStr);
+    return auth?.user?.id || null;
   } catch {
     return null;
   }
@@ -105,23 +106,27 @@ function getCurrentUserId(): string | null {
 /**
  * Load blog history from database
  */
-export async function loadBlogHistoryFromDatabase(): Promise<BlogVisit[]> {
+export async function loadBlogHistoryFromDatabase(userId?: string): Promise<BlogVisit[]> {
   try {
-    const userId = getCurrentUserId();
-    if (!userId) {
+    // If no userId provided, try to get from legacy storage or return local history
+    const id = userId || getCurrentUserId();
+
+    if (!id) {
       console.log('[BlogHistory] No user logged in, using localStorage only');
       return getBlogHistory();
     }
 
     const API_URL = getApiUrl();
-    const response = await fetch(`${API_URL}/api/users/${userId}/blog-visits?limit=${MAX_HISTORY}`);
-    
+    const response = await fetch(`${API_URL}/api/users/${id}/blog-visits?limit=${MAX_HISTORY}`, {
+      credentials: 'include'
+    });
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
 
     const dbVisits = await response.json();
-    
+
     // Convert database format to local format
     const visits: BlogVisit[] = dbVisits.map((v: any) => ({
       blogName: v.blogName,
@@ -133,7 +138,7 @@ export async function loadBlogHistoryFromDatabase(): Promise<BlogVisit[]> {
 
     // Save to localStorage as cache
     localStorage.setItem(STORAGE_KEY, JSON.stringify(visits));
-    
+
     console.log(`[BlogHistory] Loaded ${visits.length} visits from database`);
     return visits;
   } catch (error) {
@@ -145,15 +150,16 @@ export async function loadBlogHistoryFromDatabase(): Promise<BlogVisit[]> {
 /**
  * Sync blog visit to database (debounced)
  */
-async function syncToDatabase(blogName: string, displayName?: string, avatar?: string): Promise<void> {
-  const userId = getCurrentUserId();
-  if (!userId) return;
+async function syncToDatabase(blogName: string, displayName?: string, avatar?: string, userId?: string): Promise<void> {
+  const id = userId || getCurrentUserId();
+  if (!id) return;
 
   try {
     const API_URL = getApiUrl();
-    await fetch(`${API_URL}/api/users/${userId}/blog-visits`, {
+    await fetch(`${API_URL}/api/users/${id}/blog-visits`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ blogName, displayName, avatar }),
     });
     console.log(`[BlogHistory] Synced visit to @${blogName} to database`);
@@ -165,16 +171,16 @@ async function syncToDatabase(blogName: string, displayName?: string, avatar?: s
 /**
  * Track a blog visit (saves to both localStorage and database)
  */
-export function trackBlogVisit(blogName: string, displayName?: string, avatar?: string): void {
+export function trackBlogVisit(blogName: string, displayName?: string, avatar?: string, userId?: string): void {
   try {
     const history = getBlogHistory();
-    
+
     // Normalize blog name to lowercase to avoid duplicates with different capitalization
     const normalizedBlogName = blogName.toLowerCase();
-    
+
     // Find existing visit (case-insensitive comparison)
     const existingIndex = history.findIndex(v => v.blogName.toLowerCase() === normalizedBlogName);
-    
+
     if (existingIndex >= 0) {
       // Update existing visit (keep normalized name)
       history[existingIndex] = {
@@ -195,22 +201,22 @@ export function trackBlogVisit(blogName: string, displayName?: string, avatar?: 
         visitCount: 1,
       });
     }
-    
+
     // Sort by last visited and keep only MAX_HISTORY items
     const sortedHistory = history
       .sort((a, b) => b.lastVisited - a.lastVisited)
       .slice(0, MAX_HISTORY);
-    
+
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sortedHistory));
-    
+
     console.log(`[BlogHistory] Tracked visit to @${blogName} (${sortedHistory.length} blogs in history)`);
-    
+
     // Sync to database (debounced)
     if (syncTimeout) {
       clearTimeout(syncTimeout);
     }
     syncTimeout = setTimeout(() => {
-      syncToDatabase(normalizedBlogName, displayName, avatar);
+      syncToDatabase(normalizedBlogName, displayName, avatar, userId);
     }, SYNC_DEBOUNCE_MS);
   } catch (error) {
     console.error('[BlogHistory] Error tracking visit:', error);
@@ -236,21 +242,22 @@ export function getRemainingBlogs(skipRecent: number = 20): BlogVisit[] {
 /**
  * Clear blog history (both localStorage and database)
  */
-export async function clearBlogHistory(): Promise<void> {
+export async function clearBlogHistory(userId?: string): Promise<void> {
   try {
     // Clear localStorage
     localStorage.removeItem(STORAGE_KEY);
-    
+
     // Clear database
-    const userId = getCurrentUserId();
-    if (userId) {
+    const id = userId || getCurrentUserId();
+    if (id) {
       const API_URL = getApiUrl();
-      await fetch(`${API_URL}/api/users/${userId}/blog-visits`, {
+      await fetch(`${API_URL}/api/users/${id}/blog-visits`, {
         method: 'DELETE',
+        credentials: 'include'
       });
       console.log('[BlogHistory] History cleared from database');
     }
-    
+
     console.log('[BlogHistory] History cleared');
   } catch (error) {
     console.error('[BlogHistory] Error clearing history:', error);

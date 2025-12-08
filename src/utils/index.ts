@@ -20,4 +20,11 @@ export {
   removeBlogFromHistory,
   type BlogVisit
 } from './blogHistory';
+export {
+  isRateLimited,
+  recordRateLimit,
+  clearRateLimit,
+  getRetryAfter,
+  getActiveLimits
+} from './rateLimiter';
 

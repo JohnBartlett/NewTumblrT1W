@@ -109,7 +109,7 @@ export function verifyRefreshToken(token: string): { userId: string } | null {
  */
 export function setAuthCookies(res: Response, tokens: TokenPair) {
   const isProduction = process.env.NODE_ENV === 'production';
-  
+
   // Access token cookie (15 minutes)
   res.cookie('accessToken', tokens.accessToken, {
     httpOnly: true,
@@ -144,18 +144,18 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies.accessToken;
 
   if (!token) {
-    return res.status(401).json({ 
-      error: 'Unauthorized', 
-      message: 'Authentication required' 
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Authentication required'
     });
   }
 
   const payload = verifyAccessToken(token);
-  
+
   if (!payload) {
-    return res.status(401).json({ 
-      error: 'Unauthorized', 
-      message: 'Invalid or expired token' 
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid or expired token'
     });
   }
 
@@ -172,16 +172,16 @@ export function requireRole(...roles: string[]) {
     const user = (req as any).user;
 
     if (!user) {
-      return res.status(401).json({ 
-        error: 'Unauthorized', 
-        message: 'Authentication required' 
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authentication required'
       });
     }
 
     if (!roles.includes(user.role)) {
-      return res.status(403).json({ 
-        error: 'Forbidden', 
-        message: 'Insufficient permissions' 
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Insufficient permissions'
       });
     }
 
@@ -194,15 +194,23 @@ export function requireRole(...roles: string[]) {
  */
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  max: 1000, // Limit each IP to 1000 requests per windowMs (Internal API)
   message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const tumblrLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // Limit each IP to 300 requests per windowMs (Tumblr Proxy)
+  message: 'Too many Tumblr API requests, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 login attempts per windowMs
+  max: 50, // Limit each IP to 50 login attempts per windowMs
   message: 'Too many login attempts, please try again later.',
   skipSuccessfulRequests: true,
 });
@@ -254,7 +262,7 @@ export function getCorsOptions() {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       // Allow requests with no origin (mobile apps, Postman, etc.)
       if (!origin) return callback(null, true);
-      
+
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -287,14 +295,14 @@ export function sanitizeInput(input: string): string {
 export function requestSizeLimit(maxSize: number = 10 * 1024 * 1024) { // 10MB default
   return (req: Request, res: Response, next: NextFunction) => {
     const contentLength = parseInt(req.headers['content-length'] || '0', 10);
-    
+
     if (contentLength > maxSize) {
       return res.status(413).json({
         error: 'Payload Too Large',
         message: `Request body must not exceed ${maxSize / 1024 / 1024}MB`,
       });
     }
-    
+
     next();
   };
 }

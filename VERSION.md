@@ -1,5 +1,82 @@
 # Version History
 
+## v1.1.0 (November 24, 2025) - Rate Limiting & API Monitoring 🚦
+
+### 🎯 Major Features
+
+#### API Call Counter & Monitoring
+- **Live API Counter**: Real-time display of Tumblr API calls in bottom-right badge
+- **Interactive Badge**: Click to expand and see detailed stats
+- **Visual Progress Bar**: Color-coded indicator (green → yellow → orange → red)
+- **Daily Quota Tracking**: Shows current usage vs. 5,000 daily limit
+- **Reset Timer**: Displays when the daily quota resets (midnight)
+- **Auto-Refresh**: Updates every 30 seconds automatically
+
+#### Intelligent Rate Limiting
+- **Client-Side Rate Limiter**: Prevents hammering APIs after 429 responses
+- **Exponential Backoff**: 30s → 60s → 120s → 240s (max 5 min)
+- **Pre-Request Blocking**: Checks rate limits before making requests
+- **Separate Tracking**: Different limits for blog info, posts, and auth endpoints
+- **Retry Countdown**: Clear console warnings with time remaining
+
+#### Backend Caching System
+- **In-Memory Cache**: Reduces duplicate API calls by 90%+
+- **Blog Info Caching**: 10-minute TTL for blog metadata
+- **Posts Caching**: 2-minute TTL for first page of posts
+- **Auto-Cleanup**: Expired entries removed every 10 minutes
+- **Cache Stats Endpoint**: `/api/admin/cache-stats` for monitoring
+- **Manual Clear**: `/api/admin/clear-cache` for admin control
+
+#### Enhanced Error Handling
+- **JSON Parse Protection**: Checks Content-Type before parsing responses
+- **429 Text Handling**: Properly handles plain-text rate limit responses
+- **Clear User Messages**: "⚠️ Rate limit exceeded" instead of cryptic errors
+- **Graceful Degradation**: Falls back to mock data when rate limited
+
+### 🔧 Technical Improvements
+
+#### Rate Limiting Infrastructure
+- **`rateLimiter.ts` Utility**: Centralized rate limit tracking
+- **Per-Endpoint Keys**: Separate limits for different API routes
+- **Retry-After Headers**: Respects server-provided backoff times
+- **State Persistence**: Tracks failures and calculates exponential backoff
+- **Debug Tools**: `getActiveLimits()` for development monitoring
+
+#### API Call Optimization
+- **Cache Hits Logged**: Console shows when cached data is used
+- **API Call Tracking**: Persistent database tracking (ApiCallStats model)
+- **Daily Statistics**: Historical data for analytics and planning
+- **Admin Dashboard**: Real-time API usage monitoring
+
+#### Frontend Enhancements
+- **VersionBadge Overhaul**: Now shows version + API count
+- **Collapsible UI**: Toggle between compact and detailed view
+- **Color-Coded Alerts**: Visual indicators for quota consumption
+- **Global Display**: Added to RootLayout for site-wide visibility
+
+### 📦 Dependencies
+- No new dependencies required
+- Uses existing `express-rate-limit` for backend
+- Pure TypeScript/React for frontend rate limiter
+
+### 🐛 Bug Fixes
+- Fixed `SyntaxError: Unexpected token 'T'` when parsing 429 responses
+- Fixed infinite auth refresh loop causing backend 429s
+- Fixed JSON parsing errors on non-JSON API responses
+- Fixed excessive API calls from missing cache
+
+### 🔒 Security
+- Rate limiting protects against accidental API abuse
+- Exponential backoff prevents DoS-like behavior
+- Admin endpoints respect existing authentication
+
+### 📚 Documentation
+- Added inline comments for rate limiter utilities
+- Console logs explain backoff timing and reasons
+- Clear user-facing error messages
+
+---
+
 ## v0.93.0 (November 2, 2025) - Download System Overhaul 🚀
 
 ### 🎯 Major Features

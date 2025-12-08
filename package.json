@@ -1,7 +1,7 @@
 {
   "name": "new-tumblr-t3",
   "private": true,
-  "version": "0.94.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\" --names \"SERVER,CLIENT\" --prefix-colors \"bgBlue,bgGreen\"",
@@ -82,6 +82,7 @@
     "express-rate-limit": "^8.2.0",
     "framer-motion": "^10.18.0",
     "helmet": "^8.1.0",
+    "idb": "^8.0.3",
     "idb-keyval": "^6.2.2",
     "jotai": "^2.15.0",
     "jsonwebtoken": "^9.0.2",

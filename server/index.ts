@@ -6,7 +6,52 @@ import { PrismaClient, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import sharp from 'sharp';
+import cookieParser from 'cookie-parser';
+import compression from 'compression';
 import * as tumblrOAuth from './tumblrOAuth.js';
+
+// Security middleware imports
+import {
+  validateEnvironment,
+  getHelmetConfig,
+  getCorsOptions,
+  apiLimiter,
+  tumblrLimiter,
+  authLimiter,
+  requireAuth,
+  requireRole,
+  setAuthCookies,
+  clearAuthCookies,
+  generateTokenPair,
+  verifyAccessToken,
+  verifyRefreshToken,
+  sanitizeInput,
+  requestSizeLimit,
+  sanitizeUser,
+} from './middleware/security.js';
+
+// Validation middleware imports
+import {
+  validateBody,
+  registerSchema,
+  loginSchema,
+} from './middleware/validation.js';
+
+// Error handling middleware imports
+import {
+  errorHandler,
+  notFoundHandler,
+  asyncHandler,
+} from './middleware/errorHandler.js';
+
+// Encryption utilities
+import {
+  encryptOAuthTokens,
+  decryptOAuthTokens,
+} from './utils/encryption.js';
+
+// Health routes
+import healthRoutes from './routes/health.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +64,74 @@ const PORT = process.env.PORT || 3001;
 const SALT_ROUNDS = 12;
 const MIN_PASSWORD_LENGTH = 8;
 const PASSWORD_RESET_EXPIRY = 60 * 60 * 1000; // 1 hour in milliseconds
+
+// ===== CACHE FOR TUMBLR API RESPONSES =====
+// Simple in-memory cache to reduce Tumblr API calls
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+  expiresAt: number;
+}
+
+const tumblrCache = new Map<string, CacheEntry>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+
+function getCachedData(key: string): any | null {
+  const entry = tumblrCache.get(key);
+  if (!entry) return null;
+
+  if (Date.now() > entry.expiresAt) {
+    tumblrCache.delete(key);
+    return null;
+  }
+
+  console.log(`[Cache] ✅ Cache HIT for ${key}`);
+  return entry.data;
+}
+
+function setCachedData(key: string, data: any, ttl: number = CACHE_TTL): void {
+  tumblrCache.set(key, {
+    data,
+    timestamp: Date.now(),
+    expiresAt: Date.now() + ttl
+  });
+  console.log(`[Cache] 💾 Cached ${key} (TTL: ${ttl / 1000}s)`);
+}
+
+// Clear old cache entries every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  let cleared = 0;
+  for (const [key, entry] of tumblrCache.entries()) {
+    if (now > entry.expiresAt) {
+      tumblrCache.delete(key);
+      cleared++;
+    }
+  }
+  if (cleared > 0) {
+    console.log(`[Cache] 🧹 Cleared ${cleared} expired entries`);
+  }
+}, 10 * 60 * 1000);
+
+// ===== TUMBLR API THROTTLING =====
+// Enforce a minimum delay between Tumblr API calls to prevent rate limiting
+const TUMBLR_REQUEST_DELAY = 300; // 300ms delay between requests
+let tumblrRequestQueue = Promise.resolve();
+
+async function throttledTumblrFetch(url: string, options?: RequestInit): Promise<Response> {
+  // Append this request to the queue
+  const result = tumblrRequestQueue.then(async () => {
+    // Wait for the delay
+    await new Promise(resolve => setTimeout(resolve, TUMBLR_REQUEST_DELAY));
+    console.log(`[Tumblr API] 🐢 Throttled fetch: ${url.split('?')[0]}`);
+    return fetch(url, options);
+  });
+
+  // Update the queue tail, catching errors so the queue doesn't stall
+  tumblrRequestQueue = result.catch(() => { }) as Promise<void>;
+
+  return result;
+}
 
 // Helper functions
 const generateToken = () => crypto.randomBytes(32).toString('hex');
@@ -36,46 +149,72 @@ const validatePassword = (password: string): { valid: boolean; error?: string } 
   return { valid: true };
 };
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Increased limit for bulk image downloads
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// ===== SECURITY MIDDLEWARE SETUP =====
+
+// Validate environment variables on startup
+try {
+  validateEnvironment();
+  console.log('✅ Environment variables validated');
+} catch (error) {
+  console.error('❌ Environment validation failed:', error);
+  console.error('⚠️  Please check your .env file and ensure all required variables are set');
+  process.exit(1);
+}
+
+// Security headers (Helmet)
+app.use(getHelmetConfig());
+
+// Compression
+app.use(compression());
+
+// Cookie parser (required for JWT cookies)
+app.use(cookieParser());
+
+// CORS with credentials support
+app.use(cors(getCorsOptions()));
+
+// Rate limiting
+app.use('/api/', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+
+// Body parser with size limits
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Serve static files from the React app (production)
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../dist')));
 }
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+// Health check routes
+app.use('/', healthRoutes);
 
 // Emergency stop endpoint
 app.post('/api/emergency-stop', async (req, res) => {
   console.log('[EMERGENCY] 🚨 Emergency stop requested');
-  
+
   try {
     // Log the emergency stop
     console.log('[EMERGENCY] ⚠️ Emergency stop initiated at:', new Date().toISOString());
-    
+
     // In a real implementation, you might want to:
     // 1. Cancel any ongoing database operations
     // 2. Clear any queues or background jobs
     // 3. Reset rate limiters
     // 4. Force garbage collection
-    
+
     // For now, just acknowledge the request
     console.log('[EMERGENCY] ✅ Emergency stop acknowledged');
-    
-    res.json({ 
+
+    res.json({
       success: true,
       message: 'Emergency stop acknowledged',
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('[EMERGENCY] ❌ Emergency stop error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Emergency stop failed',
     });
@@ -85,11 +224,90 @@ app.post('/api/emergency-stop', async (req, res) => {
 // Tumblr API Proxy - Handles CORS by proxying through backend
 const TUMBLR_API_KEY = process.env.VITE_TUMBLR_API_KEY;
 
-// API Call Tracking for Admin Dashboard
+// ===== TUMBLR RATE LIMIT TRACKING =====
+// Store the latest rate limit info from Tumblr's response headers
+interface TumblrRateLimits {
+  limit: number;
+  remaining: number | null;
+  reset: number | null;
+  lastUpdated: number | null;
+}
+
+let latestTumblrRateLimits: TumblrRateLimits = {
+  limit: 5000,      // Default fallback (Tumblr's typical daily limit)
+  remaining: null,   // Unknown until we get a response
+  reset: null,       // Unknown until we get a response
+  lastUpdated: null
+};
+
+/**
+ * Extract and store Tumblr's rate limit headers
+ * Tumblr uses headers like: x_ratelimit_api_day_limit, x_ratelimit_api_day_remaining, x_ratelimit_api_day_reset
+ */
+function updateRateLimitsFromHeaders(headers: Headers | any) {
+  // Try different header name formats (Tumblr sometimes uses different naming)
+  const limitHeader = headers.get?.('x-ratelimit-limit') || headers.get?.('x_ratelimit_api_day_limit');
+  const remainingHeader = headers.get?.('x-ratelimit-remaining') || headers.get?.('x_ratelimit_api_day_remaining');
+  const resetHeader = headers.get?.('x-ratelimit-reset') || headers.get?.('x_ratelimit_api_day_reset');
+
+  let updated = false;
+
+  if (limitHeader) {
+    latestTumblrRateLimits.limit = parseInt(limitHeader);
+    updated = true;
+  }
+
+  if (remainingHeader !== null) {
+    const remaining = parseInt(remainingHeader);
+    latestTumblrRateLimits.remaining = remaining;
+    updated = true;
+
+    // Warn if getting low
+    if (remaining <= 100 && remaining > 50) {
+      console.warn(`[Rate Limit] ⚠️ WARNING: Only ${remaining} API calls remaining!`);
+    } else if (remaining <= 50 && remaining > 10) {
+      console.warn(`[Rate Limit] 🚨 CRITICAL: Only ${remaining} API calls remaining! Consider stopping soon.`);
+    } else if (remaining <= 10 && remaining > 0) {
+      console.error(`[Rate Limit] 🛑 DANGER: Only ${remaining} API calls left! Stop making requests!`);
+    } else if (remaining === 0) {
+      console.error(`[Rate Limit] 💥 RATE LIMIT REACHED: 0 API calls remaining until reset!`);
+    }
+  }
+
+  if (resetHeader) {
+    latestTumblrRateLimits.reset = parseInt(resetHeader);
+    updated = true;
+  }
+
+  if (updated) {
+    latestTumblrRateLimits.lastUpdated = Date.now();
+    const used = latestTumblrRateLimits.remaining !== null ? latestTumblrRateLimits.limit - latestTumblrRateLimits.remaining : '?';
+    console.log(`[Rate Limit] 📊 Tumblr API: ${used}/${latestTumblrRateLimits.limit} used, ${latestTumblrRateLimits.remaining} remaining (resets: ${resetHeader ? new Date(parseInt(resetHeader) * 1000).toLocaleTimeString() : 'unknown'})`);
+  }
+}
+
+/**
+ * Check if we should make a Tumblr API call based on rate limits
+ * Returns true if we're approaching limits and should be cautious
+ */
+function shouldThrottleRequests(): boolean {
+  if (latestTumblrRateLimits.remaining === null) {
+    return false; // Unknown state, allow request
+  }
+
+  // Stop if we have very few calls left
+  if (latestTumblrRateLimits.remaining <= 10) {
+    return true;
+  }
+
+  return false;
+}
+
+// API Call Tracking for Admin Dashboard (LEGACY - keeping for historical tracking)
 // Function to increment API call counter (now persists to database!)
 async function incrementApiCallCounter() {
   const today = new Date().toISOString().split('T')[0];
-  
+
   try {
     // Use upsert to create or update today's record
     const stats = await prisma.apiCallStats.upsert({
@@ -102,8 +320,9 @@ async function incrementApiCallCounter() {
         count: 1,
       },
     });
-    
-    console.log(`[API Tracker] 📊 API call #${stats.count} today (${today})`);
+
+    // Note: This is our internal counter, not Tumblr's actual count
+    console.log(`[API Tracker] 📝 Internal counter: ${stats.count} calls tracked today`);
     return stats;
   } catch (error) {
     console.error('[API Tracker] ❌ Error updating counter:', error);
@@ -111,13 +330,13 @@ async function incrementApiCallCounter() {
   }
 }
 
-// Function to get API stats (now reads from database!)
+// Function to get API stats (now returns REAL data from Tumblr's headers!)
 async function getApiStats() {
   const today = new Date().toISOString().split('T')[0];
-  
+
   try {
-    // Get or create today's stats record
-    const stats = await prisma.apiCallStats.upsert({
+    // Get our internal tracking for reference (optional)
+    const internalStats = await prisma.apiCallStats.upsert({
       where: { date: today },
       update: {},
       create: {
@@ -125,26 +344,49 @@ async function getApiStats() {
         count: 0,
       },
     });
-    
-    const limit = 5000; // Tumblr's typical daily limit
-    const percentage = (stats.count / limit) * 100;
-    
-    // Calculate reset time (midnight tonight)
-    const now = new Date();
-    const midnight = new Date(now);
-    midnight.setHours(24, 0, 0, 0);
-    const resetTime = midnight.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-    
+
+    // Use REAL data from Tumblr's rate limit headers
+    const limit = latestTumblrRateLimits.limit;
+    const remaining = latestTumblrRateLimits.remaining;
+    const reset = latestTumblrRateLimits.reset;
+
+    // Calculate used calls (limit - remaining)
+    const used = remaining !== null ? limit - remaining : null;
+
+    // Calculate percentage
+    const percentage = used !== null ? ((used / limit) * 100) : 0;
+
+    // Format reset time
+    let resetTime = '12:00 AM';
+    if (reset) {
+      // Reset is Unix timestamp
+      resetTime = new Date(reset * 1000).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } else {
+      // Fallback to midnight tonight
+      const now = new Date();
+      const midnight = new Date(now);
+      midnight.setHours(24, 0, 0, 0);
+      resetTime = midnight.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
+
     return {
-      date: stats.date,
-      count: stats.count,
-      limit,
+      date: today,
+      count: used !== null ? used : internalStats.count, // Use Tumblr's count, fallback to our counter
+      remaining: remaining,
+      limit: limit,
       percentage: Math.round(percentage * 10) / 10,
       resetTime,
+      source: remaining !== null ? 'tumblr' : 'internal', // Indicate data source
+      lastUpdated: latestTumblrRateLimits.lastUpdated,
+      internalCount: internalStats.count, // Keep for reference
     };
   } catch (error) {
     console.error('[API Tracker] ❌ Error getting stats:', error);
@@ -152,9 +394,13 @@ async function getApiStats() {
     return {
       date: today,
       count: 0,
+      remaining: null,
       limit: 5000,
       percentage: 0,
       resetTime: '12:00 AM',
+      source: 'fallback',
+      lastUpdated: null,
+      internalCount: 0,
     };
   }
 }
@@ -164,17 +410,17 @@ app.get('/api/tumblr/blog/:blogIdentifier/avatar/:size', async (req, res) => {
   try {
     const { blogIdentifier, size } = req.params;
     const avatarUrl = `https://api.tumblr.com/v2/blog/${blogIdentifier}/avatar/${size}`;
-    
+
     // Fetch the avatar URL (this will be a redirect)
-    const response = await fetch(avatarUrl, { redirect: 'follow' });
-    
+    const response = await throttledTumblrFetch(avatarUrl, { redirect: 'follow' });
+
     if (!response.ok) {
       return res.status(response.status).json({ error: 'Failed to fetch avatar' });
     }
-    
+
     // Get the final URL after redirects
     const finalUrl = response.url;
-    
+
     // Redirect to the actual image URL
     res.redirect(finalUrl);
   } catch (error) {
@@ -188,17 +434,17 @@ app.get('/api/tumblr/blog/:blogIdentifier/avatar', async (req, res) => {
   try {
     const { blogIdentifier } = req.params;
     const avatarUrl = `https://api.tumblr.com/v2/blog/${blogIdentifier}/avatar/128`;
-    
+
     // Fetch the avatar URL (this will be a redirect)
-    const response = await fetch(avatarUrl, { redirect: 'follow' });
-    
+    const response = await throttledTumblrFetch(avatarUrl, { redirect: 'follow' });
+
     if (!response.ok) {
       return res.status(response.status).json({ error: 'Failed to fetch avatar' });
     }
-    
+
     // Get the final URL after redirects
     const finalUrl = response.url;
-    
+
     // Redirect to the actual image URL
     res.redirect(finalUrl);
   } catch (error) {
@@ -211,9 +457,16 @@ app.get('/api/tumblr/blog/:blogIdentifier/info', async (req, res) => {
   try {
     const { blogIdentifier } = req.params;
     const { userId } = req.query;
-    
+
+    // Check cache first
+    const cacheKey = `blog-info:${blogIdentifier}`;
+    const cached = getCachedData(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     incrementApiCallCounter(); // Track API call
-    
+
     // Try OAuth first if userId is provided
     if (userId && typeof userId === 'string') {
       try {
@@ -221,7 +474,7 @@ app.get('/api/tumblr/blog/:blogIdentifier/info', async (req, res) => {
           where: { id: userId },
           select: { tumblrOAuthToken: true, tumblrOAuthTokenSecret: true }
         });
-        
+
         if (user?.tumblrOAuthToken && user?.tumblrOAuthTokenSecret) {
           console.log(`[OAuth] Fetching blog info with OAuth for ${blogIdentifier}`);
           const data = await tumblrOAuth.getBlogInfo(
@@ -231,6 +484,7 @@ app.get('/api/tumblr/blog/:blogIdentifier/info', async (req, res) => {
           );
           // Note: Blog info endpoint doesn't include follower/following counts
           // Those must be fetched separately from /user/following and /blog/{blog}/followers
+          setCachedData(cacheKey, data, 10 * 60 * 1000); // Cache for 10 minutes
           return res.json(data);
         } else {
           console.log(`[OAuth] No OAuth tokens found for user ${userId}`);
@@ -239,12 +493,40 @@ app.get('/api/tumblr/blog/:blogIdentifier/info', async (req, res) => {
         console.error('[OAuth] Failed to fetch with OAuth, falling back to API key:', oauthError);
       }
     }
-    
+
     // Fallback to API key
     const url = `https://api.tumblr.com/v2/blog/${blogIdentifier}/info?api_key=${TUMBLR_API_KEY}`;
-    const response = await fetch(url);
+    const response = await throttledTumblrFetch(url);
+
+    // READ RATE LIMIT HEADERS FROM TUMBLR
+    updateRateLimitsFromHeaders(response.headers);
+
     const data = await response.json();
-    
+
+    // Check if we hit rate limit
+    if (response.status === 429) {
+      console.error('[Tumblr API] ⚠️ Rate limit hit (429) - consider implementing backoff');
+      return res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: 'Too many requests to Tumblr API. Please try again in a few minutes.',
+        retryAfter: response.headers.get('Retry-After') || 60
+      });
+    }
+
+    // Cache successful responses
+    if (response.ok && data.meta?.status === 200) {
+      setCachedData(cacheKey, data, 10 * 60 * 1000); // Cache for 10 minutes
+    }
+
+    // Propagate rate limit info to frontend
+    if (latestTumblrRateLimits.remaining !== null) {
+      res.set('X-Tumblr-Remaining', String(latestTumblrRateLimits.remaining));
+      res.set('X-Tumblr-Limit', String(latestTumblrRateLimits.limit));
+      if (latestTumblrRateLimits.reset) {
+        res.set('X-Tumblr-Reset', String(latestTumblrRateLimits.reset));
+      }
+    }
+
     res.json(data);
   } catch (error) {
     console.error('Tumblr API proxy error:', error);
@@ -252,60 +534,27 @@ app.get('/api/tumblr/blog/:blogIdentifier/info', async (req, res) => {
   }
 });
 
-// Search Tumblr by tag
-app.get('/api/tumblr/tagged', async (req, res) => {
-  try {
-    const { tag, before, limit = '20', filter = 'text' } = req.query;
-    
-    if (!tag) {
-      return res.status(400).json({ error: 'Tag parameter is required' });
-    }
-    
-    const params = new URLSearchParams({
-      tag: tag as string,
-      api_key: TUMBLR_API_KEY,
-      limit: limit as string,
-      filter: filter as string,
-    });
-    
-    if (before) {
-      params.append('before', before as string);
-    }
-    
-    const url = `https://api.tumblr.com/v2/tagged?${params}`;
-    
-    console.log(`[Tumblr API] Searching for tag: "${tag}"`);
-    incrementApiCallCounter(); // Track API call
-    
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    res.json(data);
-  } catch (error) {
-    console.error('Tumblr tagged search error:', error);
-    res.status(500).json({ error: 'Failed to search Tumblr' });
-  }
-});
+// Search Tumblr by tag (REMOVED DUPLICATE - see line 428)
 
 // Fetch ALL notes for a specific post (paginated)
 app.get('/api/tumblr/blog/:blogIdentifier/post/:postId/notes', async (req, res) => {
   try {
     const { blogIdentifier, postId } = req.params;
     const { mode = 'all' } = req.query; // 'all', 'likes', 'conversation', 'rollup', 'reblogs_with_tags'
-    
+
     // Tumblr Notes Timeline API endpoint
     const url = `https://api.tumblr.com/v2/blog/${blogIdentifier}/notes?id=${postId}&mode=${mode}`;
-    
+
     console.log(`[Tumblr API] Fetching ALL notes for post ${postId} from ${blogIdentifier}`);
-    const response = await fetch(url);
-    
+    const response = await throttledTumblrFetch(url);
+
     if (!response.ok) {
       console.error(`[Tumblr API] Notes fetch failed: ${response.status} ${response.statusText}`);
       return res.status(response.status).json({ error: 'Failed to fetch notes from Tumblr' });
     }
-    
+
     const html = await response.text();
-    
+
     // The Notes API returns HTML, not JSON. We need to parse it or return raw HTML
     // For now, let's check if there's a JSON endpoint version
     try {
@@ -314,12 +563,12 @@ app.get('/api/tumblr/blog/:blogIdentifier/post/:postId/notes', async (req, res) 
     } catch (e) {
       // If it's HTML, we need to parse it or use a different approach
       console.log('[Tumblr API] Notes endpoint returned HTML, checking for JSON API...');
-      
+
       // Try the v2 API with api_key
       const jsonUrl = `https://api.tumblr.com/v2/blog/${blogIdentifier}/posts?id=${postId}&api_key=${TUMBLR_API_KEY}&notes_info=true`;
-      const jsonResponse = await fetch(jsonUrl);
+      const jsonResponse = await throttledTumblrFetch(jsonUrl);
       const jsonData = await jsonResponse.json();
-      
+
       res.json(jsonData);
     }
   } catch (error) {
@@ -332,25 +581,62 @@ app.get('/api/tumblr/blog/:blogIdentifier/posts', async (req, res) => {
   try {
     const { blogIdentifier } = req.params;
     const { limit = '20', offset = '0', type, tag, before, notes_info = 'true' } = req.query;
-    
+
     const params = new URLSearchParams({
       api_key: TUMBLR_API_KEY || '',
       limit: String(limit),
       offset: String(offset),
       notes_info: String(notes_info), // Pass through notes_info parameter!
     });
-    
+
     if (type) params.append('type', String(type));
     if (tag) params.append('tag', String(tag));
     if (before) params.append('before', String(before));
-    
+
+    // Check cache first (only for offset 0, as pagination changes frequently)
+    const cacheKey = `posts:${blogIdentifier}:${type || 'all'}:${tag || 'none'}:${offset}:${limit}`;
+    const cached = getCachedData(cacheKey);
+    if (cached && offset === '0') {
+      return res.json(cached);
+    }
+
     const url = `https://api.tumblr.com/v2/blog/${blogIdentifier}/posts?${params}`;
-    
-    incrementApiCallCounter(); // Track API call
+
+    incrementApiCallCounter(); // Track API call (internal counter)
     console.log(`[Tumblr API Proxy] Fetching ${blogIdentifier} with notes_info=${notes_info}`);
-    const response = await fetch(url);
+    const response = await throttledTumblrFetch(url);
+
+    // READ RATE LIMIT HEADERS FROM TUMBLR
+    updateRateLimitsFromHeaders(response.headers);
+
     const data = await response.json();
-    
+
+    // Check if we hit rate limit
+    if (response.status === 429) {
+      console.error('[Tumblr API] ⚠️ Rate limit hit (429)');
+      return res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: 'Too many requests to Tumblr API. Please try again in a few minutes.',
+        retryAfter: response.headers.get('Retry-After') || 60,
+        remaining: latestTumblrRateLimits.remaining,
+        reset: latestTumblrRateLimits.reset
+      });
+    }
+
+    // Cache first page of results for 2 minutes
+    if (response.ok && data.meta?.status === 200 && offset === '0') {
+      setCachedData(cacheKey, data, 2 * 60 * 1000); // 2 minute cache for posts
+    }
+
+    // Propagate rate limit info to frontend
+    if (latestTumblrRateLimits.remaining !== null) {
+      res.set('X-Tumblr-Remaining', String(latestTumblrRateLimits.remaining));
+      res.set('X-Tumblr-Limit', String(latestTumblrRateLimits.limit));
+      if (latestTumblrRateLimits.reset) {
+        res.set('X-Tumblr-Reset', String(latestTumblrRateLimits.reset));
+      }
+    }
+
     res.json(data);
   } catch (error) {
     console.error('Tumblr API proxy error:', error);
@@ -361,30 +647,188 @@ app.get('/api/tumblr/blog/:blogIdentifier/posts', async (req, res) => {
 app.get('/api/tumblr/tagged', async (req, res) => {
   try {
     const { tag, limit = '20', before, filter } = req.query;
-    
+
     if (!tag) {
       return res.status(400).json({ error: 'Tag parameter is required' });
     }
 
+    // Validate API key is configured
+    if (!TUMBLR_API_KEY) {
+      console.error('[Tumblr API] API key not configured');
+      return res.status(500).json({ error: 'Tumblr API key not configured' });
+    }
+
     const params = new URLSearchParams({
-      api_key: TUMBLR_API_KEY || '',
+      api_key: TUMBLR_API_KEY,
       tag: String(tag),
       limit: String(limit),
     });
-    
+
     if (before) params.append('before', String(before));
     if (filter) params.append('filter', String(filter));
-    
+
     const url = `https://api.tumblr.com/v2/tagged?${params}`;
 
-    incrementApiCallCounter(); // Track API call
-    const response = await fetch(url);
+    console.log(`[Tumblr API] Searching for tag: "${tag}"`);
+    incrementApiCallCounter(); // Track API call (internal counter)
+
+    const response = await throttledTumblrFetch(url);
+
+    // READ RATE LIMIT HEADERS FROM TUMBLR
+    updateRateLimitsFromHeaders(response.headers);
+
     const data = await response.json();
-    
+
+    // Check for Tumblr API errors
+    if (!response.ok || (data.meta && data.meta.status !== 200)) {
+      const status = data.meta?.status || response.status;
+      const errorMsg = data.meta?.msg || response.statusText;
+      console.error(`[Tumblr API] Error ${status}: ${errorMsg}`);
+
+      if (status === 429) {
+        return res.status(429).json({
+          error: 'Rate limit exceeded',
+          details: errorMsg
+        });
+      }
+
+      return res.status(status).json({
+        error: errorMsg || 'Tumblr API error',
+        meta: data.meta
+      });
+    }
+
     res.json(data);
   } catch (error) {
-    console.error('Tumblr API proxy error:', error);
-    res.status(500).json({ error: 'Failed to fetch from Tumblr API' });
+    console.error('[Tumblr API] Tagged search error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch from Tumblr API',
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+// ===== BLOG STATS ENDPOINT =====
+app.get('/api/tumblr/blog/:blogIdentifier/stats', requireAuth, async (req, res) => {
+  try {
+    const { blogIdentifier } = req.params;
+    const userId = req.user!.id;
+
+    // 1. Get DB Stats (Total Downloaded & Last Download Timestamp)
+    // Use case-insensitive search for blogName
+    const storedCount = await prisma.storedImage.count({
+      where: {
+        userId,
+        blogName: {
+          equals: blogIdentifier,
+          mode: 'insensitive'
+        }
+      }
+    });
+
+    const lastStored = await prisma.storedImage.findFirst({
+      where: {
+        userId,
+        blogName: {
+          equals: blogIdentifier,
+          mode: 'insensitive'
+        }
+      },
+      orderBy: {
+        timestamp: 'desc'
+      }
+    });
+
+    // 2. Calculate "New Since Last Download"
+    // We fetch the latest 20 posts from Tumblr and count how many are newer than our last stored image
+    let newSinceLastDownload = 0;
+    let hasMoreNew = false;
+    let totalPostsOnTumblr = 0;
+
+    if (TUMBLR_API_KEY) {
+      // A. Get Total Posts Count (from Blog Info)
+      try {
+        const infoUrl = `https://api.tumblr.com/v2/blog/${blogIdentifier}/info?api_key=${TUMBLR_API_KEY}`;
+        // Try cache first
+        const infoCacheKey = `blog-info:${blogIdentifier}`;
+        let infoData = getCachedData(infoCacheKey);
+
+        if (!infoData) {
+          const response = await throttledTumblrFetch(infoUrl);
+          if (response.ok) {
+            infoData = await response.json();
+            setCachedData(infoCacheKey, infoData, 10 * 60 * 1000);
+          }
+        }
+
+        if (infoData?.response?.blog?.posts) {
+          totalPostsOnTumblr = infoData.response.blog.posts;
+        }
+      } catch (e) {
+        console.error('Error fetching blog info for stats:', e);
+      }
+
+      // B. Check for New Posts (only if we have downloaded something before)
+      if (lastStored) {
+        try {
+          const params = new URLSearchParams({
+            api_key: TUMBLR_API_KEY,
+            limit: '20',
+            offset: '0',
+            notes_info: 'false'
+          });
+
+          const postsUrl = `https://api.tumblr.com/v2/blog/${blogIdentifier}/posts?${params}`;
+
+          // Try cache first
+          const postsCacheKey = `posts:${blogIdentifier}:all:none:0:20`;
+          let postsData = getCachedData(postsCacheKey);
+
+          if (!postsData) {
+            const response = await throttledTumblrFetch(postsUrl);
+            if (response.ok) {
+              postsData = await response.json();
+              setCachedData(postsCacheKey, postsData, 2 * 60 * 1000);
+            }
+          }
+
+          if (postsData?.response?.posts) {
+            const latestPosts = postsData.response.posts;
+            const lastStoredTime = Math.floor(new Date(lastStored.timestamp).getTime() / 1000);
+
+            for (const post of latestPosts) {
+              if (post.timestamp > lastStoredTime) {
+                newSinceLastDownload++;
+              } else {
+                break; // Found a post older or equal to last stored
+              }
+            }
+
+            if (newSinceLastDownload === 20) {
+              hasMoreNew = true;
+            }
+          }
+        } catch (e) {
+          console.error('Error fetching posts for stats:', e);
+        }
+      } else {
+        // If nothing stored, everything is "new" (or at least the latest batch)
+        newSinceLastDownload = 20;
+        hasMoreNew = true;
+      }
+    }
+
+    res.json({
+      storedCount,
+      lastStoredTimestamp: lastStored?.timestamp || null,
+      totalPostsOnTumblr,
+      newSinceLastDownload,
+      hasMoreNew
+    });
+
+  } catch (error) {
+    console.error('[Stats] Error fetching blog stats:', error);
+    res.status(500).json({ error: 'Failed to fetch blog stats' });
   }
 });
 
@@ -394,22 +838,22 @@ app.get('/api/tumblr/tagged', async (req, res) => {
 app.post('/api/auth/tumblr/connect', async (req, res) => {
   try {
     const { userId } = req.body;
-    
+
     if (!userId) {
       return res.status(400).json({ error: 'User ID required' });
     }
-    
+
     // Verify user exists
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     // Get request token and auth URL
     const { token, tokenSecret, authUrl } = await tumblrOAuth.getRequestToken();
-    
+
     console.log(`[OAuth] User ${user.username} initiating Tumblr connection`);
-    
+
     res.json({ authUrl, requestToken: token });
   } catch (error) {
     console.error('[OAuth] Error initiating connection:', error);
@@ -421,33 +865,39 @@ app.post('/api/auth/tumblr/connect', async (req, res) => {
 app.post('/api/auth/tumblr/callback', async (req, res) => {
   try {
     const { userId, oauthToken, oauthVerifier } = req.body;
-    
+
     if (!userId || !oauthToken || !oauthVerifier) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
-    
+
     // Exchange for access token
     const { accessToken, accessTokenSecret, tumblrUsername } = await tumblrOAuth.getAccessToken(
       oauthToken,
       oauthVerifier
     );
-    
-    // Save tokens to database
+
+    // Encrypt tokens before storing
+    const { encryptedToken, encryptedTokenSecret } = encryptOAuthTokens(
+      accessToken,
+      accessTokenSecret
+    );
+
+    // Save encrypted tokens to database
     await prisma.user.update({
       where: { id: userId },
       data: {
-        tumblrOAuthToken: accessToken,
-        tumblrOAuthTokenSecret: accessTokenSecret,
+        tumblrOAuthToken: encryptedToken,
+        tumblrOAuthTokenSecret: encryptedTokenSecret,
         tumblrUsername: tumblrUsername,
         tumblrConnectedAt: new Date()
       }
     });
-    
-    console.log(`[OAuth] User ${userId} successfully connected Tumblr account: ${tumblrUsername}`);
-    
-    res.json({ 
+
+    console.log(`[OAuth] User ${userId} successfully connected Tumblr account: ${tumblrUsername} (tokens encrypted)`);
+
+    res.json({
       success: true,
-      tumblrUsername 
+      tumblrUsername
     });
   } catch (error) {
     console.error('[OAuth] Error handling callback:', error);
@@ -459,11 +909,11 @@ app.post('/api/auth/tumblr/callback', async (req, res) => {
 app.post('/api/auth/tumblr/disconnect', async (req, res) => {
   try {
     const { userId } = req.body;
-    
+
     if (!userId) {
       return res.status(400).json({ error: 'User ID required' });
     }
-    
+
     await prisma.user.update({
       where: { id: userId },
       data: {
@@ -473,9 +923,9 @@ app.post('/api/auth/tumblr/disconnect', async (req, res) => {
         tumblrConnectedAt: null
       }
     });
-    
+
     console.log(`[OAuth] User ${userId} disconnected Tumblr account`);
-    
+
     res.json({ success: true });
   } catch (error) {
     console.error('[OAuth] Error disconnecting:', error);
@@ -487,7 +937,7 @@ app.post('/api/auth/tumblr/disconnect', async (req, res) => {
 app.get('/api/auth/tumblr/status/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -495,11 +945,11 @@ app.get('/api/auth/tumblr/status/:userId', async (req, res) => {
         tumblrConnectedAt: true
       }
     });
-    
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     res.json({
       connected: !!user.tumblrUsername,
       tumblrUsername: user.tumblrUsername,
@@ -515,27 +965,27 @@ app.get('/api/auth/tumblr/status/:userId', async (req, res) => {
 app.get('/api/tumblr/user/following', async (req, res) => {
   try {
     const { userId, limit = '20', offset = '0' } = req.query;
-    
+
     if (!userId || typeof userId !== 'string') {
       return res.status(400).json({ error: 'User ID required' });
     }
-    
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { tumblrOAuthToken: true, tumblrOAuthTokenSecret: true }
     });
-    
+
     if (!user?.tumblrOAuthToken || !user?.tumblrOAuthTokenSecret) {
       return res.status(401).json({ error: 'Tumblr account not connected' });
     }
-    
+
     const data = await tumblrOAuth.getUserFollowing(
       user.tumblrOAuthToken,
       user.tumblrOAuthTokenSecret,
       parseInt(limit as string),
       parseInt(offset as string)
     );
-    
+
     res.json(data);
   } catch (error) {
     console.error('[OAuth] Error fetching user following:', error);
@@ -548,32 +998,32 @@ app.get('/api/tumblr/blog/:blogIdentifier/followers', async (req, res) => {
   try {
     const { blogIdentifier } = req.params;
     const { userId, limit = '20', offset = '0' } = req.query;
-    
+
     if (!userId || typeof userId !== 'string') {
       return res.status(400).json({ error: 'User ID required' });
     }
-    
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { tumblrOAuthToken: true, tumblrOAuthTokenSecret: true, tumblrUsername: true }
     });
-    
+
     if (!user?.tumblrOAuthToken || !user?.tumblrOAuthTokenSecret) {
       return res.status(401).json({ error: 'Tumblr account not connected' });
     }
-    
+
     // Verify the blog belongs to the user (normalize blog identifier)
     const normalizedBlog = blogIdentifier.toLowerCase().includes('.')
       ? blogIdentifier.toLowerCase()
       : `${blogIdentifier.toLowerCase()}.tumblr.com`;
-    const userBlog = user.tumblrUsername 
+    const userBlog = user.tumblrUsername
       ? (user.tumblrUsername.includes('.') ? user.tumblrUsername : `${user.tumblrUsername}.tumblr.com`)
       : null;
-    
+
     if (normalizedBlog !== userBlog) {
       return res.status(403).json({ error: 'Can only get followers for your own blog' });
     }
-    
+
     const data = await tumblrOAuth.getBlogFollowers(
       normalizedBlog,
       user.tumblrOAuthToken,
@@ -581,7 +1031,7 @@ app.get('/api/tumblr/blog/:blogIdentifier/followers', async (req, res) => {
       parseInt(limit as string),
       parseInt(offset as string)
     );
-    
+
     res.json(data);
   } catch (error) {
     console.error('[OAuth] Error fetching blog followers:', error);
@@ -606,12 +1056,12 @@ app.get('/api/tumblr/blog/:blogIdentifier/likes', async (req, res) => {
       ? blogIdentifier.toLowerCase()
       : `${blogIdentifier.toLowerCase()}.tumblr.com`;
 
-        // Build URL with API key (not OAuth - this endpoint only needs API key)
-        const params = new URLSearchParams({
-          api_key: TUMBLR_API_KEY,
-          limit: limit ? String(limit) : '20',
-          notes_info: 'true' // Request notes data for liked posts
-        });
+    // Build URL with API key (not OAuth - this endpoint only needs API key)
+    const params = new URLSearchParams({
+      api_key: TUMBLR_API_KEY,
+      limit: limit ? String(limit) : '20',
+      notes_info: 'true' // Request notes data for liked posts
+    });
 
     // Only add one pagination parameter
     if (offset !== undefined) {
@@ -631,16 +1081,16 @@ app.get('/api/tumblr/blog/:blogIdentifier/likes', async (req, res) => {
     // Check for API errors
     if (data.meta && data.meta.status !== 200) {
       const errorMsg = data.meta.msg || 'Unknown error';
-      
+
       if (data.meta.status === 429) {
         return res.status(429).json({ error: 'Rate limit exceeded' });
       }
-      
+
       // The API will return an error if trying to access another blog's likes
       // or if privacy settings prevent it
-      return res.status(data.meta.status).json({ 
+      return res.status(data.meta.status).json({
         error: errorMsg,
-        meta: data.meta 
+        meta: data.meta
       });
     }
 
@@ -701,11 +1151,11 @@ app.get('/api/tumblr/oauth/blog/:blogIdentifier/posts', async (req, res) => {
   try {
     const { blogIdentifier } = req.params;
     const { userId, limit, offset } = req.query;
-    
+
     if (!userId) {
       return res.status(400).json({ error: 'User ID required' });
     }
-    
+
     // Get user's OAuth tokens
     const user = await prisma.user.findUnique({
       where: { id: String(userId) },
@@ -714,11 +1164,11 @@ app.get('/api/tumblr/oauth/blog/:blogIdentifier/posts', async (req, res) => {
         tumblrOAuthTokenSecret: true
       }
     });
-    
+
     if (!user?.tumblrOAuthToken || !user?.tumblrOAuthTokenSecret) {
       return res.status(401).json({ error: 'Tumblr account not connected' });
     }
-    
+
     // Fetch posts with OAuth
     const data = await tumblrOAuth.getBlogPosts(
       blogIdentifier,
@@ -730,7 +1180,7 @@ app.get('/api/tumblr/oauth/blog/:blogIdentifier/posts', async (req, res) => {
         notes_info: true
       }
     );
-    
+
     res.json(data);
   } catch (error) {
     console.error('[OAuth] Error fetching posts:', error);
@@ -743,11 +1193,11 @@ app.get('/api/tumblr/oauth/blog/:blogIdentifier/notes/:postId', async (req, res)
   try {
     const { blogIdentifier, postId } = req.params;
     const { userId } = req.query;
-    
+
     if (!userId) {
       return res.status(400).json({ error: 'User ID required' });
     }
-    
+
     // Get user's OAuth tokens
     const user = await prisma.user.findUnique({
       where: { id: String(userId) },
@@ -756,11 +1206,11 @@ app.get('/api/tumblr/oauth/blog/:blogIdentifier/notes/:postId', async (req, res)
         tumblrOAuthTokenSecret: true
       }
     });
-    
+
     if (!user?.tumblrOAuthToken || !user?.tumblrOAuthTokenSecret) {
       return res.status(401).json({ error: 'Tumblr account not connected' });
     }
-    
+
     // Fetch notes with OAuth
     const data = await tumblrOAuth.getPostNotes(
       blogIdentifier,
@@ -768,7 +1218,7 @@ app.get('/api/tumblr/oauth/blog/:blogIdentifier/notes/:postId', async (req, res)
       user.tumblrOAuthToken,
       user.tumblrOAuthTokenSecret
     );
-    
+
     res.json(data);
   } catch (error) {
     console.error('[OAuth] Error fetching notes:', error);
@@ -777,7 +1227,7 @@ app.get('/api/tumblr/oauth/blog/:blogIdentifier/notes/:postId', async (req, res)
 });
 
 // Register
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', validateBody(registerSchema), async (req, res) => {
   try {
     const { email, username, password, displayName } = req.body;
 
@@ -793,12 +1243,6 @@ app.post('/api/auth/register', async (req, res) => {
         return res.status(400).json({ error: 'Email already registered' });
       }
       return res.status(400).json({ error: 'Username already taken' });
-    }
-
-    // Validate password
-    const validation = validatePassword(password);
-    if (!validation.valid) {
-      return res.status(400).json({ error: validation.error });
     }
 
     // Hash password
@@ -821,7 +1265,6 @@ app.post('/api/auth/register', async (req, res) => {
           create: {
             theme: 'system',
             fontSize: 16,
-            viewMode: 'full',
             reducedMotion: false,
             enableHaptics: true,
             enableGestures: true,
@@ -842,7 +1285,18 @@ app.post('/api/auth/register', async (req, res) => {
     // In production, send verification email here
     console.log(`📧 Email verification URL: http://localhost:5173/auth/verify-email?token=${emailVerificationToken}`);
 
-    res.json(user);
+    // Generate JWT tokens
+    const tokens = generateTokenPair({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    // Set httpOnly cookies
+    setAuthCookies(res, tokens);
+
+    // Return sanitized user data
+    res.json(sanitizeUser(user));
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({ error: 'Registration failed' });
@@ -850,7 +1304,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // Login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', validateBody(loginSchema), async (req, res) => {
   try {
     const { emailOrUsername, password } = req.body;
 
@@ -880,19 +1334,68 @@ app.post('/api/auth/login', async (req, res) => {
       data: { lastLoginAt: new Date() }
     });
 
-    res.json({
-      id: user.id,
+    // Generate JWT tokens
+    const tokens = generateTokenPair({
+      userId: user.id,
       email: user.email,
-      username: user.username,
-      displayName: user.displayName,
-      avatar: user.avatar,
-      emailVerified: user.emailVerified,
-      lastLoginAt: new Date(),
       role: user.role,
     });
+
+    // Set httpOnly cookies
+    setAuthCookies(res, tokens);
+
+    // Return sanitized user data
+    res.json(sanitizeUser({
+      ...user,
+      lastLoginAt: new Date(),
+    }));
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Logout
+app.post('/api/auth/logout', (req, res) => {
+  clearAuthCookies(res);
+  res.json({ message: 'Logged out successfully' });
+});
+
+// Refresh token (uses general API rate limiter, but that's OK - 100 requests per 15 min is plenty for page loads)
+app.post('/api/auth/refresh', async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (!refreshToken) {
+      return res.status(401).json({ error: 'No refresh token' });
+    }
+
+    const payload = verifyRefreshToken(refreshToken);
+    if (!payload) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+
+    // Get user from database
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId }
+    });
+
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    // Generate new tokens
+    const tokens = generateTokenPair({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    setAuthCookies(res, tokens);
+    res.json(sanitizeUser(user));
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(401).json({ error: 'Token refresh failed' });
   }
 });
 
@@ -1208,14 +1711,14 @@ app.post('/api/stored-images', async (req, res) => {
     // Get user preferences to check deduplication settings and notes limit
     const userPrefs = await prisma.userPreferences.findUnique({
       where: { userId },
-      select: { 
+      select: {
         allowDuplicateImageUrls: true,
-        maxStoredNotes: true 
+        maxStoredNotes: true
       }
     });
     const allowDuplicateUrls = userPrefs?.allowDuplicateImageUrls ?? false;
     const maxStoredNotes = userPrefs?.maxStoredNotes ?? 50;
-    
+
     console.log(`🔍 Deduplication mode: ${allowDuplicateUrls ? 'ALLOW duplicates from different blogs' : 'STRICT (no duplicate URLs)'}`);
     console.log(`📝 Max notes per image: ${maxStoredNotes}`);
 
@@ -1227,7 +1730,7 @@ app.post('/api/stored-images', async (req, res) => {
     for (const image of images) {
       try {
         console.log('Processing image:', { postId: image.postId, blogName: image.blogName, url: image.url?.substring(0, 50) });
-        
+
         // Check if already stored by postId (same post from same blog)
         const existingByPostId = await prisma.storedImage.findUnique({
           where: {
@@ -1297,7 +1800,7 @@ app.post('/api/stored-images', async (req, res) => {
     }
 
     console.log(`📊 Results - Success: ${successCount}, Skipped: ${skippedCount}, Errors: ${errors.length}`);
-    
+
     if (errors.length > 0) {
       console.log('❌ Errors:', errors);
     }
@@ -1424,7 +1927,7 @@ app.delete('/api/stored-images/:userId/all', async (req, res) => {
 
     // Count how many images will be deleted
     const count = await prisma.storedImage.count({ where: { userId } });
-    
+
     console.log(`[DELETE ALL] 📊 Found ${count} images to delete`);
 
     // Delete all images for this user in one operation
@@ -1433,8 +1936,8 @@ app.delete('/api/stored-images/:userId/all', async (req, res) => {
     });
 
     console.log(`[DELETE ALL] ✅ Successfully deleted ${result.count} images`);
-    
-    res.json({ 
+
+    res.json({
       message: 'All images deleted successfully',
       count: result.count
     });
@@ -1493,26 +1996,26 @@ app.delete('/api/stored-images/:userId/blog/:blogName', async (req, res) => {
     console.log(`[DELETE BLOG] 🗑️ Request to delete all images from blog "${blogName}" for user ${userId}`);
 
     // Count how many images will be deleted
-    const count = await prisma.storedImage.count({ 
-      where: { 
+    const count = await prisma.storedImage.count({
+      where: {
         userId,
-        blogName 
-      } 
+        blogName
+      }
     });
-    
+
     console.log(`[DELETE BLOG] 📊 Found ${count} images to delete from blog "${blogName}"`);
 
     // Delete all images from this blog for this user
     const result = await prisma.storedImage.deleteMany({
-      where: { 
+      where: {
         userId,
-        blogName 
+        blogName
       }
     });
 
     console.log(`[DELETE BLOG] ✅ Successfully deleted ${result.count} images from blog "${blogName}"`);
-    
-    res.json({ 
+
+    res.json({
       message: `All images from ${blogName} deleted successfully`,
       count: result.count
     });
@@ -1528,7 +2031,7 @@ app.get('/api/stored-images/:userId/stats', async (req, res) => {
     const { userId } = req.params;
 
     const total = await prisma.storedImage.count({ where: { userId } });
-    
+
     const byBlog = await prisma.storedImage.groupBy({
       by: ['blogName'],
       where: { userId },
@@ -1548,8 +2051,8 @@ app.get('/api/stored-images/:userId/stats', async (req, res) => {
     res.json({
       total,
       totalCost: parseFloat(totalCost.toFixed(2)),
-      byBlog: byBlog.map(b => ({ 
-        blogName: b.blogName, 
+      byBlog: byBlog.map(b => ({
+        blogName: b.blogName,
         count: b._count,
         totalCost: b._sum.cost ? parseFloat(b._sum.cost.toFixed(2)) : 0,
       })),
@@ -1655,7 +2158,7 @@ app.post('/api/users/:userId/blog-visits/sync', async (req, res) => {
     const results = [];
     for (const visit of visits) {
       const normalizedBlogName = visit.blogName.toLowerCase();
-      
+
       const existing = await prisma.blogVisitHistory.findUnique({
         where: {
           userId_blogName: {
@@ -1849,20 +2352,20 @@ app.delete('/api/admin/users/:id', async (req, res) => {
 // Like Python's asyncio.Semaphore - limits concurrent operations
 async function fetchInBatches(items: any[], batchSize: number, fetchFn: (item: any, index: number) => Promise<any>) {
   const results: any[] = [];
-  
+
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
     const batchResults = await Promise.all(
       batch.map((item, batchIndex) => fetchFn(item, i + batchIndex))
     );
     results.push(...batchResults);
-    
+
     // Small delay between batches to prevent overwhelming the system
     if (i + batchSize < items.length) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
-  
+
   return results;
 }
 
@@ -1871,7 +2374,7 @@ async function fetchInBatches(items: any[], batchSize: number, fetchFn: (item: a
 app.post('/api/download/bulk', async (req, res) => {
   try {
     const { images } = req.body; // Array of { url, filename, metadata }
-    
+
     if (!images || !Array.isArray(images) || images.length === 0) {
       return res.status(400).json({ error: 'No images provided' });
     }
@@ -1890,54 +2393,54 @@ app.post('/api/download/bulk', async (req, res) => {
         }
         const buffer = Buffer.from(await response.arrayBuffer());
         const fetchTime = Date.now() - fetchStart;
-        
+
         // Embed metadata into image using sharp
         let processedBuffer = buffer;
         if (image.metadata) {
           try {
             const metadata = image.metadata;
-            
+
             // Build EXIF data
             const exifData: any = {};
-            
+
             // ImageDescription (EXIF tag 270) - use imageText or description
             if (metadata.imageText || metadata.description) {
               exifData.ImageDescription = metadata.imageText || metadata.description || '';
             }
-            
+
             // UserComment (EXIF tag 37510) - full text content
             if (metadata.imageText) {
               exifData.UserComment = metadata.imageText;
             }
-            
+
             // Artist (EXIF tag 315) - blog name
             if (metadata.blogName) {
               exifData.Artist = metadata.blogName;
             }
-            
+
             // Copyright (EXIF tag 33432) - blog URL
             if (metadata.blogUrl) {
               exifData.Copyright = metadata.blogUrl;
             }
-            
+
             // Build IPTC data
             const iptcData: any = {};
-            
+
             // Caption/Abstract (IPTC tag 2:120) - imageText or description
             if (metadata.imageText || metadata.description) {
               iptcData['2:120'] = metadata.imageText || metadata.description || '';
             }
-            
+
             // Keywords (IPTC tag 2:25) - tags
             if (metadata.tags && metadata.tags.length > 0) {
               iptcData['2:25'] = metadata.tags;
             }
-            
+
             // Copyright Notice (IPTC tag 2:116) - blog name
             if (metadata.blogName) {
               iptcData['2:116'] = `© ${metadata.blogName}`;
             }
-            
+
             // Process image with sharp to embed metadata
             // Sharp's withMetadata() preserves existing metadata and allows adding new metadata
             // We'll build a metadata object that sharp can understand
@@ -1947,13 +2450,13 @@ app.post('/api/download/bulk', async (req, res) => {
               // IPTC data (Caption, Keywords, Copyright Notice)
               iptc: iptcData,
             };
-            
+
             // Embed metadata into image using sharp
             // Note: sharp may not support all EXIF/IPTC fields, but will preserve what it can
             processedBuffer = await sharp(buffer)
               .withMetadata(metadataObj)
               .toBuffer();
-            
+
             console.log(`[Parallel Download] ✓ ${index + 1}/${images.length}: ${image.filename} (${(buffer.byteLength / 1024).toFixed(1)}KB → ${(processedBuffer.byteLength / 1024).toFixed(1)}KB, metadata embedded, ${fetchTime}ms)`);
           } catch (metadataError) {
             // If metadata embedding fails, use original image
@@ -1963,7 +2466,7 @@ app.post('/api/download/bulk', async (req, res) => {
         } else {
           console.log(`[Parallel Download] ✓ ${index + 1}/${images.length}: ${image.filename} (${(buffer.byteLength / 1024).toFixed(1)}KB, ${fetchTime}ms)`);
         }
-        
+
         // Convert to base64 for JSON transport
         return {
           filename: image.filename,
@@ -1978,10 +2481,10 @@ app.post('/api/download/bulk', async (req, res) => {
     });
 
     const successfulDownloads = results.filter(r => r !== null);
-    
+
     const totalTime = Date.now() - startTime;
     const totalSize = successfulDownloads.reduce((sum, r) => sum + (r?.size || 0), 0);
-    
+
     console.log(`[Parallel Download] Completed ${successfulDownloads.length}/${images.length} images in ${(totalTime / 1000).toFixed(2)}s (${(totalSize / 1024 / 1024).toFixed(2)}MB total)`);
 
     res.json({
@@ -2009,6 +2512,41 @@ app.get('/api/admin/stats', async (req, res) => {
   } catch (error) {
     console.error('[Admin] Error getting stats:', error);
     res.status(500).json({ error: 'Failed to get stats' });
+  }
+});
+
+// Get cache statistics
+app.get('/api/admin/cache-stats', async (req, res) => {
+  try {
+    const now = Date.now();
+    const entries = Array.from(tumblrCache.entries()).map(([key, entry]) => ({
+      key,
+      age: Math.floor((now - entry.timestamp) / 1000),
+      ttl: Math.floor((entry.expiresAt - now) / 1000),
+      size: JSON.stringify(entry.data).length
+    }));
+
+    res.json({
+      totalEntries: tumblrCache.size,
+      entries: entries.sort((a, b) => a.ttl - b.ttl),
+      totalSizeBytes: entries.reduce((sum, e) => sum + e.size, 0)
+    });
+  } catch (error) {
+    console.error('[Admin] Error getting cache stats:', error);
+    res.status(500).json({ error: 'Failed to get cache stats' });
+  }
+});
+
+// Clear cache
+app.post('/api/admin/clear-cache', async (req, res) => {
+  try {
+    const size = tumblrCache.size;
+    tumblrCache.clear();
+    console.log(`[Admin] 🧹 Cache cleared (${size} entries)`);
+    res.json({ message: 'Cache cleared', entriesCleared: size });
+  } catch (error) {
+    console.error('[Admin] Error clearing cache:', error);
+    res.status(500).json({ error: 'Failed to clear cache' });
   }
 });
 
@@ -2062,7 +2600,7 @@ app.get('/api/admin/database-stats', async (req, res) => {
     // Get actual row counts for tables that exist
     // Extract table names from the query results
     const existingTables = tableSizes.map(t => t.table_name);
-    
+
     // Helper to safely count rows
     const safeCount = async (tableName: string, countFn: () => Promise<number>) => {
       try {
@@ -2075,7 +2613,7 @@ app.get('/api/admin/database-stats', async (req, res) => {
     };
 
     const rowCountPromises = [];
-    
+
     // Only query tables that we know exist
     if (existingTables.includes('User')) {
       rowCountPromises.push(safeCount('User', () => prisma.user.count()));
@@ -2147,7 +2685,7 @@ app.get('/api/admin/database-stats', async (req, res) => {
       searchHistory: getTableSize('SearchHistory'),
       blogs: getTableSize('Blog'),
       apiStats: getTableSize('ApiCallStats'),
-      other: tables.filter(t => 
+      other: tables.filter(t =>
         !['StoredImage', 'User', 'UserPreferences', 'Post', 'SavedPost', 'LikedPost', 'Follow', 'SearchHistory', 'Blog', 'ApiCallStats', '_prisma_migrations'].includes(t.name)
       ).reduce((sum, t) => sum + t.totalSize, 0),
     };
@@ -2161,7 +2699,7 @@ app.get('/api/admin/database-stats', async (req, res) => {
   } catch (error) {
     console.error('[Admin] Error getting database stats:', error);
     console.error('[Admin] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to get database stats',
       details: error instanceof Error ? error.message : String(error)
     });
@@ -2172,20 +2710,20 @@ app.get('/api/admin/database-stats', async (req, res) => {
 app.post('/api/admin/reset', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
-    
+
     // Get current count before reset
     const oldStats = await prisma.apiCallStats.findUnique({
       where: { date: today },
     });
     const oldCount = oldStats?.count || 0;
-    
+
     // Reset to 0
     await prisma.apiCallStats.upsert({
       where: { date: today },
       update: { count: 0 },
       create: { date: today, count: 0 },
     });
-    
+
     console.log(`[Admin] 🔄 Counter manually reset from ${oldCount} to 0`);
     res.json({ message: 'Counter reset successfully', oldCount, newCount: 0 });
   } catch (error) {
@@ -2193,6 +2731,15 @@ app.post('/api/admin/reset', async (req, res) => {
     res.status(500).json({ error: 'Failed to reset counter' });
   }
 });
+
+// ===== ERROR HANDLING MIDDLEWARE =====
+// Must be LAST, after all routes
+
+// 404 handler for unknown API routes
+app.use(notFoundHandler);
+
+// General error handler
+app.use(errorHandler);
 
 // Catch-all handler: serve index.html for client-side routing (production)
 if (process.env.NODE_ENV === 'production') {

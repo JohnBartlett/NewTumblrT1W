@@ -1,17 +1,19 @@
+import { isRateLimited, recordRateLimit, clearRateLimit, getRetryAfter } from '@/utils/rateLimiter';
+
 // Dynamic API URL based on current host
 const getApiUrl = () => {
   // If VITE_API_URL is explicitly set, use it
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL;
   }
-  
+
   // Otherwise, use the same host as the frontend (works for WiFi, Tailscale, localhost)
   if (typeof window !== 'undefined') {
     const protocol = window.location.protocol;
     const hostname = window.location.hostname;
     return `${protocol}//${hostname}:3001`;
   }
-  
+
   // Fallback for SSR or Node environment
   return 'http://localhost:3001';
 };
@@ -50,6 +52,7 @@ export const authApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // Important: Send cookies
       body: JSON.stringify(data),
     });
 
@@ -67,6 +70,7 @@ export const authApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // Important: Send cookies
       body: JSON.stringify(data),
     });
 
@@ -78,8 +82,49 @@ export const authApi = {
     return response.json();
   },
 
+  async logout(): Promise<void> {
+    const response = await fetch(`${API_URL}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include', // Important: Send cookies
+    });
+
+    if (!response.ok) {
+      throw new Error('Logout failed');
+    }
+  },
+
+  async refreshToken(): Promise<UserSession> {
+    // Check if we're rate limited
+    const rateLimitKey = 'auth:refresh';
+    if (isRateLimited(rateLimitKey)) {
+      const retryAfter = getRetryAfter(rateLimitKey);
+      throw new Error(`Auth refresh rate limited. Retry in ${retryAfter}s`);
+    }
+
+    const response = await fetch(`${API_URL}/api/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include', // Important: Send cookies
+    });
+
+    if (!response.ok) {
+      // Record rate limit on 429
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        recordRateLimit(rateLimitKey, retryAfter ? parseInt(retryAfter) : 60); // Default 60s
+        console.error('[Auth] ⚠️ Refresh endpoint rate limited (429)');
+      }
+      throw new Error('Token refresh failed');
+    }
+
+    // Clear rate limit on success
+    clearRateLimit(rateLimitKey);
+    return response.json();
+  },
+
   async getUserById(userId: string): Promise<UserSession | null> {
-    const response = await fetch(`${API_URL}/api/users/${userId}`);
+    const response = await fetch(`${API_URL}/api/users/${userId}`, {
+      credentials: 'include', // Important: Send cookies
+    });
 
     if (!response.ok) {
       if (response.status === 404) return null;
@@ -95,6 +140,7 @@ export const authApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // Important: Send cookies
       body: JSON.stringify({ userId, currentPassword, newPassword }),
     });
 
@@ -110,6 +156,7 @@ export const authApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // Important: Send cookies
       body: JSON.stringify({ emailOrUsername }),
     });
 
@@ -127,6 +174,7 @@ export const authApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // Important: Send cookies
       body: JSON.stringify({ token, newPassword }),
     });
 
@@ -144,6 +192,7 @@ export const authApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // Important: Send cookies
       body: JSON.stringify({ token }),
     });
 
@@ -161,6 +210,7 @@ export const authApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // Important: Send cookies
       body: JSON.stringify({ userId }),
     });
 
@@ -178,6 +228,7 @@ export const authApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // Important: Send cookies
       body: JSON.stringify({ email }),
     });
 

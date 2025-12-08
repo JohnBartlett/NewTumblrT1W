@@ -39,6 +39,7 @@ model User {
   
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime? // Soft delete
   
   // Relations with cascade delete
   preferences   UserPreferences?
@@ -52,6 +53,7 @@ model User {
   blogVisits    BlogVisitHistory[]
   blogs         Blog[]
   storedImages  StoredImage[]
+  notes         Note[]
   
   @@index([email])
   @@index([username])
@@ -225,8 +227,10 @@ model StoredImage {
   cost        Float?   // Cost/value in dollars
   timestamp   DateTime // Original post timestamp
   storedAt    DateTime @default(now())
+  deletedAt   DateTime? // Soft delete
   
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storedNotes Note[]
   
   @@unique([userId, postId])
   @@index([userId])
@@ -234,6 +238,28 @@ model StoredImage {
   @@index([blogName])
   @@index([storedAt])
   @@index([timestamp])
+  @@index([deletedAt])
+  @@index([userId, blogName, storedAt])
+}
+
+model Note {
+  id              String   @id @default(uuid())
+  userId          String
+  storedImageId   String
+  type            String   // like, reblog, reply, posted
+  blogName        String
+  avatarUrl       String?
+  timestamp       DateTime?
+  replyText       String?
+  reblogParentBlog String?
+  createdAt       DateTime @default(now())
+  
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storedImage  StoredImage @relation(fields: [storedImageId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([storedImageId])
+  @@index([type])
 }
 
 model ApiCallStats {

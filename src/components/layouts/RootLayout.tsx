@@ -2,6 +2,7 @@ import { Outlet } from '@tanstack/react-router';
 
 import { Navigation } from '@/components/navigation/Navigation';
 import { MobileBottomNav } from '@/components/navigation/MobileBottomNav';
+import { VersionBadge } from '@/components/ui/VersionBadge';
 import { useAuth } from '@/hooks/queries/useAuth';
 
 export function RootLayout() {
@@ -14,6 +15,7 @@ export function RootLayout() {
         <Outlet />
       </main>
       {currentUser && <MobileBottomNav />}
+      <VersionBadge />
     </div>
   );
 }

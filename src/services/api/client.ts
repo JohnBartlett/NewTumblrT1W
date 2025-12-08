@@ -1,8 +1,3 @@
-import { tokenAtom } from '@/store';
-import { getDefaultStore } from 'jotai';
-
-const store = getDefaultStore();
-
 interface ApiClientConfig {
   baseURL: string;
   version: string;
@@ -49,11 +44,7 @@ export class ApiClient {
       'Content-Type': 'application/json',
     });
 
-    const token = store.get(tokenAtom);
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
-
+    // Token is now handled via HttpOnly cookies
     return headers;
   }
 
@@ -86,6 +77,7 @@ export class ApiClient {
           ...Object.fromEntries(this.getHeaders()),
           ...headers,
         },
+        credentials: 'include', // Send cookies with request
         body: body ? JSON.stringify(body) : undefined,
         signal: signal || controller.signal,
       });

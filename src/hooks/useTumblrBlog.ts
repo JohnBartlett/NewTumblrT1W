@@ -374,10 +374,18 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
             setError(errorMessage);
           } else {
             // Temporary errors (rate limit, network issues, API key not configured) - fall back to mock data
-            console.log(`[useTumblrBlog] Temporary error, using mock data:`, errorMessage);
+            const isRateLimit = errorMessage.includes('Rate limit') || errorMessage.includes('429') || errorMessage.includes('Too many requests');
+            
+            if (isRateLimit) {
+              console.warn(`[useTumblrBlog] ⚠️ RATE LIMITED - Using mock data temporarily. Please wait a few minutes before refreshing.`);
+              setError('⚠️ Rate limit exceeded. Tumblr is temporarily limiting requests. Showing sample data. Please try again in a few minutes.');
+            } else {
+              console.log(`[useTumblrBlog] Temporary error, using mock data:`, errorMessage);
+              setError(errorMessage);
+            }
+            
             setBlogData(generateMockBlogData(blogIdentifier));
             setUsingMockData(true);
-            setError(errorMessage);
           }
         }
       } finally {

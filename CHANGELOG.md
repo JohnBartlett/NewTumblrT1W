@@ -51,6 +51,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Released]
 
+## [1.1.0] - 2025-11-24
+
+### Added
+
+- **API Call Counter Badge**: Live monitoring of Tumblr API usage
+  - Real-time display in bottom-right corner of all pages
+  - Click to expand/collapse detailed view
+  - Shows current count, daily limit (5,000), and percentage used
+  - Color-coded progress bar (green → yellow → orange → red)
+  - Reset time indicator (shows when quota resets at midnight)
+  - Auto-refresh every 30 seconds
+- **Client-Side Rate Limiter**: Intelligent request throttling
+  - Exponential backoff on 429 responses (30s → 60s → 120s → 240s)
+  - Pre-request blocking to prevent hammering APIs
+  - Separate tracking for different endpoints (posts, info, auth)
+  - Console warnings with retry countdown timers
+  - Respects server `Retry-After` headers
+- **Backend Caching System**: Reduces duplicate API calls
+  - In-memory cache with configurable TTL
+  - Blog info cached for 10 minutes
+  - Blog posts (first page) cached for 2 minutes
+  - Automatic cleanup of expired entries every 10 minutes
+  - Admin endpoints for cache stats and manual clearing
+  - Cache hit/miss logging for debugging
+- **API Stats Persistence**: Historical tracking in database
+  - `ApiCallStats` model tracks daily usage
+  - Persistent across server restarts
+  - Admin dashboard endpoint (`/api/admin/stats`)
+  - Automatic daily reset (new date record)
+
+### Fixed
+
+- **JSON Parsing Errors**: Fixed `SyntaxError: Unexpected token 'T'`
+  - Now checks Content-Type header before parsing
+  - Handles plain-text 429 responses correctly
+  - Graceful error messages instead of parse failures
+- **Auth Refresh Loop**: Fixed infinite token refresh causing backend 429s
+  - Added rate limiting to `/api/auth/refresh` calls
+  - Won't retry immediately after 429
+  - 60-second default backoff for auth failures
+  - Centralized refresh logic prevents multiple simultaneous calls
+- **Excessive API Calls**: Cache prevents redundant requests
+  - Same blog info request within 10 minutes uses cache
+  - Same posts request within 2 minutes uses cache
+  - 90%+ reduction in duplicate API calls
+
+### Changed
+
+- **VersionBadge Component**: Enhanced with API counter
+  - Now shows both version number and API call count
+  - Collapsible interface (click to expand/collapse)
+  - Moved to RootLayout for global display across all pages
+  - Professional dark theme with backdrop blur
+- **Version Number**: Updated from 0.94.0 to 1.1.0
+  - Major feature additions warrant minor version bump
+  - Reflects significant improvements to API management
+
+### Technical
+
+- **New Utility**: `src/utils/rateLimiter.ts`
+  - Client-side rate limit tracking and enforcement
+  - Per-endpoint state management
+  - Exponential backoff calculations
+  - Debug tools for active limits
+- **Enhanced Error Handling**: 
+  - All API calls check rate limits before execution
+  - Clear user-facing messages for rate limit errors
+  - Fallback to mock data when appropriate
+- **Cache Implementation**:
+  - Simple Map-based cache with TTL
+  - Configurable expiration times
+  - Automatic background cleanup
+  - Admin monitoring tools
+
 ## [0.94.0] - 2025-11-11
 
 ### Added

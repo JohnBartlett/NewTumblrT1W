@@ -3,6 +3,8 @@
  * Proxies through backend to avoid CORS issues
  */
 
+import { isRateLimited, recordRateLimit, clearRateLimit, getRetryAfter } from '@/utils/rateLimiter';
+
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const TUMBLR_PROXY_BASE = `${API_BASE}/api/tumblr`;
 
@@ -128,12 +130,44 @@ export async function fetchBlogPosts(
     if (options.tag) params.append('tag', options.tag);
     if (options.before) params.append('before', String(options.before));
 
+    // Check if we're rate limited before making the request
+    const rateLimitKey = `tumblr:posts:${normalizedBlog}`;
+    if (isRateLimited(rateLimitKey)) {
+      const retryAfter = getRetryAfter(rateLimitKey);
+      throw new Error(`Rate limit exceeded. Please try again in ${retryAfter} seconds.`);
+    }
+
     const url = `${TUMBLR_PROXY_BASE}/blog/${normalizedBlog}/posts?${params}`;
     
     console.log(`[Tumblr API] Fetching posts from ${normalizedBlog} (notes_info=${options.notes_info !== false})`);
     const response = await fetch(url);
     
-    // Always parse JSON response to get error details
+    // Handle rate limiting (429) before trying to parse JSON
+    if (response.status === 429) {
+      console.error('[Tumblr API] ⚠️ Rate limit exceeded (429)');
+      // Try to get the text response (might not be JSON)
+      const text = await response.text();
+      // Record rate limit with exponential backoff
+      const retryAfter = response.headers.get('Retry-After');
+      recordRateLimit(rateLimitKey, retryAfter ? parseInt(retryAfter) : undefined);
+      throw new Error(`Rate limit exceeded. ${text || 'Please try again in a few minutes.'}`);
+    }
+    
+    // Clear rate limit on successful response
+    if (response.ok) {
+      clearRateLimit(rateLimitKey);
+    }
+    
+    // Check if response is JSON before parsing
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      // Not JSON - read as text
+      const text = await response.text();
+      console.error('[Tumblr API] Non-JSON response:', text);
+      throw new Error(`API error: ${text || response.statusText}`);
+    }
+    
+    // Parse JSON response to get error details
     const data: TumblrBlogPostsResponse = await response.json();
     
     if (!response.ok || data.meta.status !== 200) {
@@ -273,6 +307,15 @@ export async function fetchBlogInfo(blogIdentifier: string, userId?: string) {
 
   try {
     const normalizedBlog = normalizeBlogIdentifier(blogIdentifier);
+    
+    // Check if we're rate limited before making the request
+    const rateLimitKey = `tumblr:info:${normalizedBlog}`;
+    if (isRateLimited(rateLimitKey)) {
+      const retryAfter = getRetryAfter(rateLimitKey);
+      console.warn(`[Tumblr API] Blocked by rate limiter. Retry in ${retryAfter}s`);
+      return null;
+    }
+    
     const url = `${TUMBLR_PROXY_BASE}/blog/${normalizedBlog}/info${userId ? `?userId=${userId}` : ''}`;
     
     console.log(`[Tumblr API] Fetching blog info: ${normalizedBlog}${userId ? ' (with OAuth)' : ''}`);
@@ -282,9 +325,26 @@ export async function fetchBlogInfo(blogIdentifier: string, userId?: string) {
       if (response.status === 429) {
         console.error(`[Tumblr API] ⚠️ RATE LIMIT EXCEEDED (429) - You've hit the hourly (1,000) or daily (5,000) request limit`);
         console.error(`[Tumblr API] Please wait before making more requests or request rate limit removal in your Tumblr app settings`);
+        // Read the response body (might be plain text, not JSON)
+        const text = await response.text();
+        console.error(`[Tumblr API] 429 Response: ${text}`);
+        // Record rate limit
+        const retryAfter = response.headers.get('Retry-After');
+        recordRateLimit(rateLimitKey, retryAfter ? parseInt(retryAfter) : undefined);
       } else {
         console.error(`[Tumblr API] Error: ${response.status} ${response.statusText}`);
       }
+      return null;
+    }
+    
+    // Clear rate limit on successful response
+    clearRateLimit(rateLimitKey);
+
+    // Check if response is JSON before parsing
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error('[Tumblr API] Non-JSON response:', text);
       return null;
     }
 

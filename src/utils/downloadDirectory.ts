@@ -35,7 +35,7 @@ export async function requestDownloadDirectory(): Promise<FileSystemDirectoryHan
     // Save the handle to IndexedDB
     await set(DIRECTORY_HANDLE_KEY, dirHandle);
     console.log('[Download Dir] ✅ Directory selected and saved:', dirHandle.name);
-    
+
     return dirHandle;
   } catch (error: any) {
     if (error.name === 'AbortError') {
@@ -58,7 +58,7 @@ export async function getDownloadDirectory(): Promise<FileSystemDirectoryHandle 
 
   try {
     const dirHandle = await get<FileSystemDirectoryHandle>(DIRECTORY_HANDLE_KEY);
-    
+
     if (!dirHandle) {
       console.log('[Download Dir] No directory saved');
       return null;
@@ -66,7 +66,7 @@ export async function getDownloadDirectory(): Promise<FileSystemDirectoryHandle 
 
     // Check if we still have permission
     const permission = await dirHandle.queryPermission({ mode: 'readwrite' });
-    
+
     if (permission === 'granted') {
       console.log('[Download Dir] ✅ Using saved directory:', dirHandle.name);
       return dirHandle;
@@ -75,7 +75,7 @@ export async function getDownloadDirectory(): Promise<FileSystemDirectoryHandle 
     // Try to request permission again
     console.log('[Download Dir] Permission not granted, requesting...');
     const newPermission = await dirHandle.requestPermission({ mode: 'readwrite' });
-    
+
     if (newPermission === 'granted') {
       console.log('[Download Dir] ✅ Permission granted for:', dirHandle.name);
       return dirHandle;
@@ -86,6 +86,19 @@ export async function getDownloadDirectory(): Promise<FileSystemDirectoryHandle 
   } catch (error) {
     console.error('[Download Dir] ❌ Error getting directory:', error);
     return null;
+  }
+}
+
+/**
+ * Get the raw stored directory handle without permission checks
+ * Useful for 'startIn' option in showDirectoryPicker
+ */
+export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHandle | undefined> {
+  try {
+    return await get<FileSystemDirectoryHandle>(DIRECTORY_HANDLE_KEY);
+  } catch (error) {
+    console.error('[Download Dir] Error getting stored handle:', error);
+    return undefined;
   }
 }
 
@@ -130,17 +143,17 @@ export async function downloadToDirectory(
 ): Promise<{ success: boolean; method: 'filesystem' | 'fallback'; error?: string }> {
   // Try File System Access API first
   const dirHandle = await getDownloadDirectory();
-  
+
   if (dirHandle) {
     try {
       // Create the file in the directory
       const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
       const writable = await fileHandle.createWritable();
-      
+
       // Write the blob content
       await writable.write(blob);
       await writable.close();
-      
+
       console.log(`[Download Dir] ✅ Saved to directory: ${filename}`);
       return { success: true, method: 'filesystem' };
     } catch (error: any) {
@@ -159,7 +172,7 @@ export async function downloadToDirectory(
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    
+
     console.log(`[Download Dir] ✅ Downloaded using fallback: ${filename}`);
     return { success: true, method: 'fallback' };
   } catch (error: any) {
@@ -186,15 +199,15 @@ export async function downloadToSubdirectory(
   try {
     // Create or get the subdirectory
     const subdirHandle = await parentDirHandle.getDirectoryHandle(subdirName, { create: true });
-    
+
     // Create the file in the subdirectory
     const fileHandle = await subdirHandle.getFileHandle(filename, { create: true });
     const writable = await fileHandle.createWritable();
-    
+
     // Write the blob content
     await writable.write(blob);
     await writable.close();
-    
+
     console.log(`[Download Dir] ✅ Saved to ${subdirName}/${filename}`);
     return { success: true };
   } catch (error: any) {
@@ -216,9 +229,9 @@ export async function downloadAllToSubdirectory(
   subdirName: string,
   files: Array<{ blob: Blob; filename: string }>,
   onProgress?: (current: number, total: number) => void
-): Promise<{ 
-  success: boolean; 
-  successCount: number; 
+): Promise<{
+  success: boolean;
+  successCount: number;
   failedCount: number;
   method: 'filesystem' | 'fallback';
   error?: string;
@@ -236,23 +249,23 @@ export async function downloadAllToSubdirectory(
     });
 
     console.log(`[Download Dir] Creating subdirectory: ${subdirName}`);
-    
+
     // Create or get the subdirectory
     const subdirHandle = await parentDirHandle.getDirectoryHandle(subdirName, { create: true });
-    
+
     let successCount = 0;
     let failedCount = 0;
 
     // Download each file
     for (let i = 0; i < files.length; i++) {
       const { blob, filename } = files[i];
-      
+
       try {
         const fileHandle = await subdirHandle.getFileHandle(filename, { create: true });
         const writable = await fileHandle.createWritable();
         await writable.write(blob);
         await writable.close();
-        
+
         successCount++;
         console.log(`[Download Dir] ✅ (${i + 1}/${files.length}) Saved: ${filename}`);
       } catch (error) {
@@ -271,7 +284,7 @@ export async function downloadAllToSubdirectory(
     }
 
     console.log(`[Download Dir] ✅ Batch download complete: ${successCount} succeeded, ${failedCount} failed`);
-    
+
     return {
       success: failedCount === 0,
       successCount,
@@ -289,9 +302,9 @@ export async function downloadAllToSubdirectory(
         error: 'User cancelled directory selection',
       };
     }
-    
+
     console.error('[Download Dir] ❌ Error in batch download:', error);
-    
+
     // Fallback to traditional downloads
     return downloadAllToSubdirectoryFallback(subdirName, files, onProgress);
   }
@@ -304,21 +317,21 @@ async function downloadAllToSubdirectoryFallback(
   subdirName: string,
   files: Array<{ blob: Blob; filename: string }>,
   onProgress?: (current: number, total: number) => void
-): Promise<{ 
-  success: boolean; 
-  successCount: number; 
+): Promise<{
+  success: boolean;
+  successCount: number;
   failedCount: number;
   method: 'filesystem' | 'fallback';
   error?: string;
 }> {
   console.log(`[Download Dir] Using fallback method for ${files.length} files`);
-  
+
   let successCount = 0;
   let failedCount = 0;
 
   for (let i = 0; i < files.length; i++) {
     const { blob, filename } = files[i];
-    
+
     try {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -329,7 +342,7 @@ async function downloadAllToSubdirectoryFallback(
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
+
       successCount++;
       console.log(`[Download Dir] ✅ (${i + 1}/${files.length}) Downloaded: ${filename}`);
     } catch (error) {
@@ -348,7 +361,7 @@ async function downloadAllToSubdirectoryFallback(
   }
 
   console.log(`[Download Dir] ✅ Fallback download complete: ${successCount} succeeded, ${failedCount} failed`);
-  
+
   return {
     success: failedCount === 0,
     successCount,

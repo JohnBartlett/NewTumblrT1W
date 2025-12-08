@@ -96,6 +96,7 @@ export function Blog() {
 
   const [showMetadata, setShowMetadata] = useState(false);
   const [metadataForImage, setMetadataForImage] = useState<BlogPost | null>(null);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   const {
     blogData,
@@ -109,8 +110,8 @@ export function Blog() {
     usingMockData
   } = useTumblrBlog(username);
 
-  // Fetch liked posts
-  const fetchLikedPosts = async (limit: number = 20, reset: boolean = false) => {
+  // Fetch liked posts (improved version with target image count)
+  const fetchLikedPosts = async (targetImageCount: number = 50, reset: boolean = false) => {
     if (loadingLikes || loadingMoreLikes) return;
 
     const isInitial = reset || likedPostsData.length === 0;
@@ -123,31 +124,93 @@ export function Blog() {
 
     try {
       const apiUrl = getApiUrl();
-      const offset = reset ? 0 : likesOffset;
-      // If using timestamp pagination
-      const timestampParam = !reset && likesNextTimestamp ? `&before=${likesNextTimestamp}` : '';
+      let currentOffset = reset ? 0 : likesOffset;
+      let currentTimestamp = reset ? undefined : likesNextTimestamp;
+      let allTransformedPosts: BlogPost[] = reset ? [] : [...likedPostsData];
+      let totalLikes = 0;
+      let hasMore = true;
+      const batchSize = 20; // Fetch 20 posts at a time
+      const maxBatches = 50; // Safety limit - allow up to 1000 posts to find images
+      let batchCount = 0;
 
-      const response = await fetch(`${apiUrl}/api/blog/${username}/likes?limit=${limit}&offset=${offset}${timestampParam}`);
+      // Keep fetching until we have enough images or run out of posts
+      while (hasMore && batchCount < maxBatches) {
+        // Build URL with timestamp-based pagination only (no offset to avoid duplicates)
+        const timestampParam = currentTimestamp ? `&before=${currentTimestamp}` : '';
+        const response = await fetch(`${apiUrl}/api/tumblr/blog/${username}/likes?limit=${batchSize}${timestampParam}`);
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch likes: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch likes: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const rawLikedPosts = data.response?.liked_posts || [];
+        totalLikes = data.response?.liked_count || 0;
+
+        // No more posts available
+        if (rawLikedPosts.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        // Transform this batch
+        const transformedBatch = rawLikedPosts.map((post: any): BlogPost => {
+          const images = post.photos?.map((photo: any) => photo.original_size?.url).filter(Boolean) || [];
+
+          return {
+            id: String(post.id),
+            type: post.type || 'photo',
+            content: post.summary || post.caption || post.body || '',
+            timestamp: (post.liked_timestamp || post.timestamp || 0) * 1000,
+            notes: post.note_count || 0,
+            notesData: post.notes || [],
+            tags: post.tags || [],
+            images: images,
+            imageWidth: post.photos?.[0]?.original_size?.width,
+            imageHeight: post.photos?.[0]?.original_size?.height,
+          };
+        });
+
+        // Add to accumulated posts (avoid duplicates)
+        const existingIds = new Set(allTransformedPosts.map(p => p.id));
+        const newPosts = transformedBatch.filter(p => !existingIds.has(p.id));
+        allTransformedPosts = [...allTransformedPosts, ...newPosts];
+
+        // Update offset for state tracking (even though we don't use it for pagination)
+        currentOffset += newPosts.length;
+
+        // Update pagination timestamp for next batch
+        if (data.response?._links?.next?.query_params?.before) {
+          currentTimestamp = data.response._links.next.query_params.before;
+        } else if (rawLikedPosts.length > 0) {
+          // Fallback: use the timestamp of the last post
+          const lastPost = rawLikedPosts[rawLikedPosts.length - 1];
+          currentTimestamp = lastPost.liked_timestamp || lastPost.timestamp;
+        }
+
+        // Continue if we got posts AND haven't reached our target yet
+        batchCount++;
+
+        const currentImageCount = allTransformedPosts.filter(p => p.images && p.images.length > 0).length;
+        const batchHasImages = newPosts.filter((p: BlogPost) => p.images?.length).length;
+
+        // Keep going if we got NEW posts and need more images
+        hasMore = newPosts.length > 0 && currentImageCount < targetImageCount;
+
+        console.log(`[Blog] Batch ${batchCount}: Got ${rawLikedPosts.length} posts (${newPosts.length} new), ${batchHasImages} with images. Total: ${allTransformedPosts.length} posts, ${currentImageCount} images. Need ${Math.max(0, targetImageCount - currentImageCount)} more images. hasMore=${hasMore}`);
       }
 
-      const data = await response.json();
-
-      if (reset) {
-        setLikedPostsData(data.posts);
-        setLikesOffset(data.posts.length);
-      } else {
-        setLikedPostsData(prev => [...prev, ...data.posts]);
-        setLikesOffset(prev => prev + data.posts.length);
+      // Update state with all accumulated posts
+      setLikedPostsData(allTransformedPosts);
+      setLikesOffset(currentOffset);
+      setLikesTotalCount(totalLikes);
+      setLikesHasMore(hasMore);
+      if (currentTimestamp) {
+        setLikesNextTimestamp(currentTimestamp);
       }
 
-      setLikesTotalCount(data.total_likes);
-      setLikesHasMore(data.posts.length === limit); // Rough check
-      if (data._links?.next?.query_params?.before) {
-        setLikesNextTimestamp(data._links.next.query_params.before);
-      }
+      const finalImageCount = allTransformedPosts.filter(p => p.images && p.images.length > 0).length;
+      console.log(`[Blog] Finished fetching likes: ${allTransformedPosts.length} posts total, ${finalImageCount} with images`);
 
     } catch (err) {
       console.error('Error fetching likes:', err);
@@ -159,8 +222,13 @@ export function Blog() {
   };
 
   const loadMoreLikes = () => {
-    fetchLikedPosts(20, false);
+    fetchLikedPosts(50, false); // Fetch 50 more images
   };
+
+  const loadMultipleLikes = (imageCount: number) => {
+    fetchLikedPosts(imageCount, false);
+  };
+
 
   const loadMultipleLikes = (count: number) => {
     fetchLikedPosts(count, false);
@@ -1042,6 +1110,11 @@ export function Blog() {
       const cols = window.innerWidth >= 1024 ? 4 : window.innerWidth >= 768 ? 3 : 2;
 
       switch (e.key) {
+        case '?':
+          e.preventDefault();
+          // Show keyboard shortcuts help
+          setShowShortcutsHelp(true);
+          break;
         case 'f':
         case 'F':
           e.preventDefault();
@@ -1057,22 +1130,22 @@ export function Blog() {
             setShowMetadata(true);
           }
           break;
-        case '1':
+        case '5':
           e.preventDefault();
-          // Load +50
+          // Load +50 images
           if (contentMode === 'likes') {
             if (!loadingMoreLikes && likesHasMore) {
-              loadMoreLikes();
+              loadMultipleLikes(50);
             }
           } else {
             if (!loadingMore && hasMore && blogData) {
-              loadMore();
+              loadMultiple(50);
             }
           }
           break;
-        case '2':
+        case '1':
           e.preventDefault();
-          // Load +100
+          // Load +100 images
           if (contentMode === 'likes') {
             if (!loadingMoreLikes && likesHasMore) {
               loadMultipleLikes(100);
@@ -1083,9 +1156,9 @@ export function Blog() {
             }
           }
           break;
-        case '3':
+        case '2':
           e.preventDefault();
-          // Load +200
+          // Load +200 images
           if (contentMode === 'likes') {
             if (!loadingMoreLikes && likesHasMore) {
               loadMultipleLikes(200);
@@ -1093,19 +1166,6 @@ export function Blog() {
           } else {
             if (!loadingMore && hasMore && blogData) {
               loadMultiple(200);
-            }
-          }
-          break;
-        case '4':
-          e.preventDefault();
-          // Load +1000
-          if (contentMode === 'likes') {
-            if (!loadingMoreLikes && likesHasMore) {
-              loadMultipleLikes(1000);
-            }
-          } else {
-            if (!loadingMore && hasMore && blogData) {
-              loadMultiple(1000);
             }
           }
           break;
@@ -1160,12 +1220,33 @@ export function Blog() {
             setGridSelection(newSelection);
           }
           break;
+        case 'Escape':
+          e.preventDefault();
+          // Close shortcuts help if open
+          if (showShortcutsHelp) {
+            setShowShortcutsHelp(false);
+          }
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [viewMode, focusedIndex, filteredAndSortedPhotoPosts, gridSelection]);
+  }, [
+    viewMode,
+    focusedIndex,
+    filteredAndSortedPhotoPosts,
+    gridSelection,
+    contentMode,
+    loadingMore,
+    loadingMoreLikes,
+    hasMore,
+    likesHasMore,
+    blogData,
+    loadMultiple,
+    loadMultipleLikes,
+    showShortcutsHelp
+  ]);
 
   // Generate mock notes for a post
   const generateMockNotes = (post: BlogPost): Note[] => {
@@ -2394,6 +2475,142 @@ export function Blog() {
                 imageHeight: metadataForImage.imageHeight,
               } : undefined}
             />
+
+            {/* Keyboard Shortcuts Help Modal */}
+            {showShortcutsHelp && (
+              <div
+                className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+                onClick={() => setShowShortcutsHelp(false)}
+              >
+                <div
+                  className="bg-gray-900 border border-gray-700 rounded-lg p-8 max-w-2xl w-full mx-4 shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold text-white">Keyboard Shortcuts</h2>
+                    <button
+                      onClick={() => setShowShortcutsHelp(false)}
+                      className="text-gray-400 hover:text-white transition-colors"
+                    >
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div className="space-y-6">
+                    {/* Navigation Section */}
+                    <div>
+                      <h3 className="text-lg font-semibold text-blue-400 mb-3">Navigation</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Arrow Keys</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">← ↑ → ↓</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Navigate Images</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Home / End</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">Home / End</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">First / Last Image</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Page Up / Down</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">PgUp / PgDn</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Jump 3 Rows</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions Section */}
+                    <div>
+                      <h3 className="text-lg font-semibold text-green-400 mb-3">Actions</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">View Image</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">Enter</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Open Fullscreen</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Select Image</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">Space</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Toggle Selection</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Show Metadata</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">X</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Image Details</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Load More Section */}
+                    <div>
+                      <h3 className="text-lg font-semibold text-purple-400 mb-3">Load More Images</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Load +50</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">5</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">50 More Images</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Load +100</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">1</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">100 More Images</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Load +200</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">2</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">200 More Images</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* View Mode Section */}
+                    <div>
+                      <h3 className="text-lg font-semibold text-yellow-400 mb-3">View Mode</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Full View</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">F</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Switch to Full View</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Close Help</span>
+                          <kbd className="px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm text-white">Esc</kbd>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-300">Close This Dialog</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-4 border-t border-gray-700 text-center">
+                    <p className="text-gray-400 text-sm">Press <kbd className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs text-white">?</kbd> to show shortcuts, <kbd className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs text-white">Esc</kbd> to close</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )
         }

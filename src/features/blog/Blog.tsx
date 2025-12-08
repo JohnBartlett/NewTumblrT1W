@@ -229,11 +229,6 @@ export function Blog() {
     fetchLikedPosts(imageCount, false);
   };
 
-
-  const loadMultipleLikes = (count: number) => {
-    fetchLikedPosts(count, false);
-  };
-
   // Range selection mode for mobile
   const [rangeMode, setRangeMode] = useState(false);
   const [rangeStart, setRangeStart] = useState<number | null>(null);
@@ -1168,6 +1163,18 @@ export function Blog() {
               loadMultiple(200);
             }
           }
+          break;
+        case 't':
+        case 'T':
+          e.preventDefault();
+          // Jump to top (first image)
+          setFocusedIndex(0);
+          break;
+        case 'b':
+        case 'B':
+          e.preventDefault();
+          // Jump to bottom (last image)
+          setFocusedIndex(photoPosts.length - 1);
           break;
         case 'Home':
           e.preventDefault();

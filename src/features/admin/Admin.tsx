@@ -3,7 +3,6 @@ import { useAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { VersionBadge } from '@/components/ui/VersionBadge';
 import { userAtom } from '@/store/auth';
 
 // Dynamic API URL
@@ -73,13 +72,13 @@ export default function Admin() {
       setError(null);
       console.log('[Admin] Fetching stats from:', `${API_URL}/api/admin/stats`);
       const response = await fetch(`${API_URL}/api/admin/stats`);
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('[Admin] API error:', response.status, errorText);
         throw new Error(`HTTP ${response.status}: ${errorText || 'Failed to fetch stats'}`);
       }
-      
+
       const data = await response.json();
       console.log('[Admin] Stats received:', data);
       setStats(data);
@@ -95,19 +94,19 @@ export default function Admin() {
 
   const fetchDatabaseStats = async () => {
     if (!user?.id) return;
-    
+
     try {
       setDbError(null);
       setDbLoading(true);
       console.log('[Admin] Fetching database stats from:', `${API_URL}/api/admin/database-stats`);
       const response = await fetch(`${API_URL}/api/admin/database-stats?adminId=${user.id}`);
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('[Admin] Database stats API error:', response.status, errorText);
         throw new Error(`HTTP ${response.status}: ${errorText || 'Failed to fetch database stats'}`);
       }
-      
+
       const data = await response.json();
       console.log('[Admin] Database stats received:', data);
       setDbStats(data);
@@ -143,11 +142,11 @@ export default function Admin() {
       navigate({ to: '/auth', search: { mode: 'login' } });
       return;
     }
-    
+
     fetchStats();
     fetchDatabaseStats(); // Fetch database stats on load
-    // Refresh API stats every 10 seconds
-    const interval = setInterval(fetchStats, 10000);
+    // Refresh API stats every 60 seconds
+    const interval = setInterval(fetchStats, 60000);
     return () => clearInterval(interval);
   }, [user, navigate]);
 
@@ -221,9 +220,9 @@ export default function Admin() {
   // Calculate remaining capacity for common actions
   const calculateCapacity = (): UsageCapacity => {
     if (!stats) return { viewBlog: 0, view500Images: 0, view1000Images: 0, browse20Blogs: 0 };
-    
+
     const remaining = stats.limit - stats.count;
-    
+
     return {
       viewBlog: Math.floor(remaining / 2),           // 1 blog info + 1 posts = 2 calls
       view500Images: Math.floor(remaining / 11),     // 1 info + 10 posts = 11 calls
@@ -330,7 +329,7 @@ export default function Admin() {
                     ⚠️ Near Rate Limit
                   </div>
                   <div className="text-sm text-red-700 dark:text-red-400 mt-1">
-                    You've used {stats.percentage.toFixed(1)}% of your daily API quota. 
+                    You've used {stats.percentage.toFixed(1)}% of your daily API quota.
                     Consider reducing API calls or waiting for the reset.
                   </div>
                 </div>
@@ -359,7 +358,7 @@ export default function Admin() {
                     Approaching Limit
                   </div>
                   <div className="text-sm text-yellow-700 dark:text-yellow-400 mt-1">
-                    You've used {stats.percentage.toFixed(1)}% of your daily quota. 
+                    You've used {stats.percentage.toFixed(1)}% of your daily quota.
                     Monitor usage carefully.
                   </div>
                 </div>
@@ -413,7 +412,7 @@ export default function Admin() {
               </svg>
               Tumblr API Limits
             </h3>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Daily Limit */}
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
@@ -478,7 +477,7 @@ export default function Admin() {
                       💎 Upgrade to OAuth for Higher Limits
                     </div>
                     <div className="text-sm text-green-700 dark:text-green-400">
-                      Connect your Tumblr account via OAuth to get much higher (or unlimited) rate limits. 
+                      Connect your Tumblr account via OAuth to get much higher (or unlimited) rate limits.
                       Click "Connect Tumblr Account" in Settings to upgrade.
                     </div>
                   </div>
@@ -505,7 +504,7 @@ export default function Admin() {
               </svg>
               What You Can Do Today (Remaining Capacity)
             </h3>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* View Single Blog */}
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
@@ -659,7 +658,7 @@ export default function Admin() {
           {/* Info */}
           <div className="text-xs text-gray-500 dark:text-gray-400">
             <p>
-              <strong>Note:</strong> Counter tracks API calls to Tumblr since server start. 
+              <strong>Note:</strong> Counter tracks API calls to Tumblr since server start.
               Tumblr's actual rate limit may differ. Counter resets automatically at midnight.
               Auto-refreshes every 10 seconds.
             </p>
@@ -713,7 +712,7 @@ export default function Admin() {
                   </svg>
                   Storage Breakdown by Category
                 </h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {/* Stored Images */}
                   <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
@@ -830,7 +829,7 @@ export default function Admin() {
                   </svg>
                   Detailed Table Sizes
                 </h3>
-                
+
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                     <thead className="bg-gray-50 dark:bg-gray-900">
@@ -902,8 +901,7 @@ export default function Admin() {
           )}
         </CardContent>
       </Card>
-      
-      <VersionBadge />
+
     </div>
   );
 }

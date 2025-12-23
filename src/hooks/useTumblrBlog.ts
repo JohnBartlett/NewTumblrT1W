@@ -43,7 +43,7 @@ function extractImagesFromHtml(html: string): string[] {
   const images: string[] = [];
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
-  
+
   // Find all <img> tags
   const imgElements = doc.querySelectorAll('img');
   imgElements.forEach((img) => {
@@ -61,7 +61,7 @@ function extractImagesFromHtml(html: string): string[] {
       }
     }
   });
-  
+
   return images;
 }
 
@@ -83,7 +83,7 @@ function convertTumblrPost(post: TumblrPost): BlogPost {
     // Other post types: try caption first, then body, then summary
     content = post.caption || post.body || post.summary || '';
   }
-  
+
   const images: string[] = [];
   let imageWidth: number | undefined;
   let imageHeight: number | undefined;
@@ -95,7 +95,7 @@ function convertTumblrPost(post: TumblrPost): BlogPost {
     imageWidth = photo.original_size.width;
     imageHeight = photo.original_size.height;
   }
-  
+
   // Extract images from HTML content (text posts, captions, etc.)
   if (post.body) {
     const htmlImages = extractImagesFromHtml(post.body);
@@ -105,7 +105,7 @@ function convertTumblrPost(post: TumblrPost): BlogPost {
     const htmlImages = extractImagesFromHtml(post.caption);
     images.push(...htmlImages);
   }
-  
+
   // If we found HTML images but no dimensions, try to extract from first image
   if (images.length > 0 && !imageWidth && post.body) {
     const parser = new DOMParser();
@@ -139,23 +139,23 @@ function convertTumblrPost(post: TumblrPost): BlogPost {
 function generateMockBlogData(username: string): BlogData {
   const isPhotoArchive = username === 'photoarchive';
   const postCount = isPhotoArchive ? 300 : 30;
-  
+
   const allTags = [
     'photography', 'nature', 'landscape', 'travel', 'wanderlust',
     'aesthetic', 'vsco', 'art', 'beautiful', 'stunning',
     'sunset', 'mountains', 'ocean', 'cityscape', 'architecture',
     'minimalism', 'vintage', 'retro', 'mood', 'vibes',
   ];
-  
-  const normalizedBlog = username.toLowerCase().includes('.') 
-    ? username.toLowerCase() 
+
+  const normalizedBlog = username.toLowerCase().includes('.')
+    ? username.toLowerCase()
     : `${username.toLowerCase()}.tumblr.com`;
-  
+
   return {
     username,
     displayName: isPhotoArchive ? 'Photo Archive 📸' : (username.charAt(0).toUpperCase() + username.slice(1)),
     avatar: `${API_URL}/api/tumblr/blog/${normalizedBlog}/avatar/128`,
-    description: isPhotoArchive 
+    description: isPhotoArchive
       ? 'A massive collection of curated photography from around the world.'
       : `This is ${username}'s blog. A collection of thoughts, photos, and creative content.`,
     followerCount: isPhotoArchive ? 45238 : Math.floor(Math.random() * 10000),
@@ -163,10 +163,10 @@ function generateMockBlogData(username: string): BlogData {
     postCount: isPhotoArchive ? 8547 : Math.floor(Math.random() * 500) + 50,
     posts: Array.from({ length: postCount }, (_, i) => {
       const isPhoto = isPhotoArchive ? true : (Math.random() > 0.4);
-      const tags = Array.from({ length: Math.floor(Math.random() * 4) + 2 }, () => 
+      const tags = Array.from({ length: Math.floor(Math.random() * 4) + 2 }, () =>
         allTags[Math.floor(Math.random() * allTags.length)]
       );
-      
+
       return {
         id: `post-${i}`,
         type: isPhoto ? 'photo' : 'text',
@@ -223,8 +223,8 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
         }
 
         // Fetch posts with notes_info=true to get real notes data!
-        const postsResponse = await fetchBlogPosts(blogIdentifier, { 
-          limit: 50, 
+        const postsResponse = await fetchBlogPosts(blogIdentifier, {
+          limit: 50,
           type: undefined,
           notes_info: true  // This gets us up to 50 notes per post!
         });
@@ -241,17 +241,17 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
         // Fetch blog info separately (with OAuth if available)
         const infoResponse = await fetchBlogInfo(blogIdentifier, userId);
         const info = infoResponse || postsResponse.response.blog;
-        
+
         // Log the full info response for debugging
         console.log(`[useTumblrBlog] Blog info response:`, info);
         console.log(`[useTumblrBlog] Info keys:`, Object.keys(info || {}));
-        
+
         // Use actual Tumblr blog avatar via backend proxy (avoids CORS issues)
-        const normalizedBlog = blogIdentifier.toLowerCase().includes('.') 
-          ? blogIdentifier.toLowerCase() 
+        const normalizedBlog = blogIdentifier.toLowerCase().includes('.')
+          ? blogIdentifier.toLowerCase()
           : `${blogIdentifier.toLowerCase()}.tumblr.com`;
         const avatarUrl = `${API_URL}/api/tumblr/blog/${normalizedBlog}/avatar/128`;
-        
+
         // Check if we got notes data
         const firstPostWithNotes = postsResponse.response.posts.find(p => p.notes && p.notes.length > 0);
         if (firstPostWithNotes) {
@@ -262,11 +262,11 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
         }
 
         const totalPosts = info?.posts || postsResponse.response.total_posts || 0;
-        
+
         // Fetch follower/following counts ONLY using the dedicated endpoints (not from blog info API)
         let followerCount = -1; // -1 means "not available"
         let followingCount = -1;
-        
+
         // Only fetch counts if OAuth is connected AND we're viewing the user's own blog
         if (hasOAuth && userId && userBlogName) {
           const normalizedUserBlog = userBlogName.includes('.')
@@ -275,33 +275,33 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
           const normalizedCurrentBlog = blogIdentifier.toLowerCase().includes('.')
             ? blogIdentifier.toLowerCase()
             : `${blogIdentifier.toLowerCase()}.tumblr.com`;
-          
+
           // If viewing your own blog, fetch follower/following counts using dedicated endpoints
           if (normalizedCurrentBlog === normalizedUserBlog) {
             try {
               console.log(`[useTumblrBlog] Viewing own blog, fetching follower/following counts from dedicated endpoints...`);
-              
+
               // Get followers count (blogs following you) - using /blog/{blog}/followers endpoint
               const followersResponse = await fetch(`${API_URL}/api/tumblr/blog/${normalizedCurrentBlog}/followers?userId=${userId}&limit=1&offset=0`);
               if (followersResponse.ok) {
                 const followersData = await followersResponse.json();
                 console.log(`[useTumblrBlog] Followers response:`, followersData);
                 // Tumblr API returns total_users field in response
-                followerCount = followersData?.response?.total_users ?? 
-                               (followersData?.response?.users?.length || 0);
+                followerCount = followersData?.response?.total_users ??
+                  (followersData?.response?.users?.length || 0);
                 console.log(`[useTumblrBlog] ✅ Got followers count: ${followerCount}`);
               } else {
                 console.warn(`[useTumblrBlog] Failed to fetch followers: ${followersResponse.status}`);
               }
-              
+
               // Get following count (blogs you follow) - using /user/following endpoint
               const followingResponse = await fetch(`${API_URL}/api/tumblr/user/following?userId=${userId}&limit=1&offset=0`);
               if (followingResponse.ok) {
                 const followingData = await followingResponse.json();
                 console.log(`[useTumblrBlog] Following response:`, followingData);
                 // Tumblr API returns total_blogs field in response
-                followingCount = followingData?.response?.total_blogs ?? 
-                                (followingData?.response?.blogs?.length || 0);
+                followingCount = followingData?.response?.total_blogs ??
+                  (followingData?.response?.blogs?.length || 0);
                 console.log(`[useTumblrBlog] ✅ Got following count: ${followingCount}`);
               } else {
                 console.warn(`[useTumblrBlog] Failed to fetch following: ${followingResponse.status}`);
@@ -315,7 +315,7 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
         } else {
           console.log(`[useTumblrBlog] Cannot fetch follower/following counts: hasOAuth=${hasOAuth}, userId=${!!userId}, userBlogName=${!!userBlogName}`);
         }
-        
+
         const blogData: BlogData = {
           username: blogIdentifier,
           displayName: info?.title || blogIdentifier,
@@ -337,25 +337,25 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
         console.error('[useTumblrBlog] Error fetching blog:', err);
         if (mounted) {
           const errorMessage = err instanceof Error ? err.message : 'Failed to load blog';
-          
+
           // Determine if blog is truly inaccessible (vs temporary API issues)
-          const isInaccessible = 
+          const isInaccessible =
             errorMessage.includes('[404]') || errorMessage.includes('Not Found') || errorMessage.includes('does not exist') ||
             errorMessage.includes('[403]') || errorMessage.includes('Forbidden') ||
             errorMessage.includes('[401]') || errorMessage.includes('Unauthorized') ||
             errorMessage.includes('Code: 4012') || errorMessage.includes('only viewable within') ||
             errorMessage.includes('dashboard only') || errorMessage.includes('restricted');
-          
+
           if (isInaccessible) {
             // Blog is inaccessible - show header info but no posts
             console.log(`[useTumblrBlog] Blog ${blogIdentifier} is inaccessible:`, errorMessage);
-            
+
             // Try to fetch blog info to show the header
             const infoResponse = await fetchBlogInfo(blogIdentifier);
-            
+
             // Create blog data with info but NO posts
-            const normalizedBlog = blogIdentifier.toLowerCase().includes('.') 
-              ? blogIdentifier.toLowerCase() 
+            const normalizedBlog = blogIdentifier.toLowerCase().includes('.')
+              ? blogIdentifier.toLowerCase()
               : `${blogIdentifier.toLowerCase()}.tumblr.com`;
             const blogDataWithoutPosts: BlogData = {
               username: blogIdentifier,
@@ -368,14 +368,14 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
               likesCount: infoResponse?.blog?.likes !== undefined ? infoResponse.blog.likes : undefined,
               posts: [], // NO POSTS - this is the key difference
             };
-            
+
             setBlogData(blogDataWithoutPosts);
             setUsingMockData(false);
             setError(errorMessage);
           } else {
             // Temporary errors (rate limit, network issues, API key not configured) - fall back to mock data
             const isRateLimit = errorMessage.includes('Rate limit') || errorMessage.includes('429') || errorMessage.includes('Too many requests');
-            
+
             if (isRateLimit) {
               console.warn(`[useTumblrBlog] ⚠️ RATE LIMITED - Using mock data temporarily. Please wait a few minutes before refreshing.`);
               setError('⚠️ Rate limit exceeded. Tumblr is temporarily limiting requests. Showing sample data. Please try again in a few minutes.');
@@ -383,7 +383,7 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
               console.log(`[useTumblrBlog] Temporary error, using mock data:`, errorMessage);
               setError(errorMessage);
             }
-            
+
             setBlogData(generateMockBlogData(blogIdentifier));
             setUsingMockData(true);
           }
@@ -417,16 +417,21 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
 
       if (postsResponse && postsResponse.meta.status === 200) {
         const newPosts = postsResponse.response.posts.map(convertTumblrPost);
-        
-        setBlogData(prev => prev ? {
-          ...prev,
-          posts: [...prev.posts, ...newPosts],
-        } : null);
-        
+
+        setBlogData(prev => {
+          if (!prev) return null;
+          const existingIds = new Set(prev.posts.map(p => p.id));
+          const uniqueNewPosts = newPosts.filter(p => !existingIds.has(p.id));
+          return {
+            ...prev,
+            posts: [...prev.posts, ...uniqueNewPosts],
+          };
+        });
+
         const newOffset = offset + 50;
         setOffset(newOffset);
         setHasMore(newOffset < blogData.postCount);
-        
+
         console.log(`[useTumblrBlog] Loaded ${newPosts.length} more posts (total: ${blogData.posts.length + newPosts.length}/${blogData.postCount})`);
       }
     } catch (err) {
@@ -449,12 +454,12 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
       const remaining = blogData.postCount - blogData.posts.length;
       const toLoad = Math.min(count, remaining);
       console.log(`[useTumblrBlog] Loading ${toLoad} posts...`);
-      
+
       // Load in batches of 50, tracking offset internally
-      const allNewPosts: any[] = [];
+      const allNewPosts: BlogPost[] = [];
       let currentOffset = offset;
       const batches = Math.ceil(toLoad / 50);
-      
+
       for (let i = 0; i < batches; i++) {
         const postsResponse = await fetchBlogPosts(blogIdentifier, {
           limit: 50,
@@ -464,30 +469,32 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
         });
 
         if (postsResponse && postsResponse.meta.status === 200) {
-          const newPosts = postsResponse.response.posts.map(convertTumblrPost);
-          allNewPosts.push(...newPosts);
+          const transformed = postsResponse.response.posts.map(convertTumblrPost);
+          allNewPosts.push(...transformed);
           currentOffset += 50;
-          
+
           // Update progress
           console.log(`[useTumblrBlog] Progress: ${allNewPosts.length}/${toLoad} posts loaded...`);
         } else {
           break;
         }
       }
-      
-      // Combine existing posts with newly loaded posts
-      const allPosts = [...blogData.posts, ...allNewPosts];
-      
+
+      // Combine existing posts with newly loaded posts (avoiding duplicates)
+      const existingIds = new Set(blogData.posts.map(p => p.id));
+      const filteredNewPosts = allNewPosts.filter(p => !existingIds.has(p.id));
+      const allPosts = [...blogData.posts, ...filteredNewPosts];
+
       setBlogData(prev => prev ? {
         ...prev,
         posts: allPosts,
       } : null);
-      
+
       setOffset(currentOffset);
       setHasMore(currentOffset < blogData.postCount);
-      
-      console.log(`[useTumblrBlog] ✅ Loaded ${allNewPosts.length} posts! Total: ${allPosts.length}`);
-      
+
+      console.log(`[useTumblrBlog] ✅ Loaded ${filteredNewPosts.length} new posts! Total: ${allPosts.length}`);
+
       // Return the complete posts array directly
       return allPosts;
     } catch (err) {
@@ -510,11 +517,11 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
     try {
       const remaining = blogData.postCount - blogData.posts.length;
       console.log(`[useTumblrBlog] Loading all remaining ${remaining} posts...`);
-      
+
       // Load in batches of 50
-      const allNewPosts: any[] = [];
+      const allNewPosts: BlogPost[] = [];
       let currentOffset = offset;
-      
+
       while (currentOffset < blogData.postCount) {
         const postsResponse = await fetchBlogPosts(blogIdentifier, {
           limit: 50,
@@ -524,30 +531,32 @@ export function useTumblrBlog(blogIdentifier: string, userId?: string) {
         });
 
         if (postsResponse && postsResponse.meta.status === 200) {
-          const newPosts = postsResponse.response.posts.map(convertTumblrPost);
-          allNewPosts.push(...newPosts);
+          const transformed = postsResponse.response.posts.map(convertTumblrPost);
+          allNewPosts.push(...transformed);
           currentOffset += 50;
-          
+
           // Update progress
           console.log(`[useTumblrBlog] Progress: ${allNewPosts.length}/${remaining} posts loaded...`);
         } else {
           break;
         }
       }
-      
-      // Combine existing posts with newly loaded posts
-      const allPosts = [...blogData.posts, ...allNewPosts];
-      
+
+      // Combine existing posts with newly loaded posts (avoiding duplicates)
+      const existingIds = new Set(blogData.posts.map(p => p.id));
+      const filteredNewPosts = allNewPosts.filter(p => !existingIds.has(p.id));
+      const allPosts = [...blogData.posts, ...filteredNewPosts];
+
       setBlogData(prev => prev ? {
         ...prev,
         posts: allPosts,
       } : null);
-      
+
       setOffset(currentOffset);
       setHasMore(false);
-      
-      console.log(`[useTumblrBlog] ✅ Loaded all ${allNewPosts.length} remaining posts! Total: ${allPosts.length}`);
-      
+
+      console.log(`[useTumblrBlog] ✅ Loaded all ${filteredNewPosts.length} new posts! Total: ${allPosts.length}`);
+
       // Return the complete posts array directly
       return allPosts;
     } catch (err) {

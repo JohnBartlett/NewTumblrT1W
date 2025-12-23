@@ -3,7 +3,6 @@ import { useNavigate } from '@tanstack/react-router';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
-import { VersionBadge } from '@/components/ui/VersionBadge';
 import { Container } from '@/components/layouts';
 import { useAuth } from '@/hooks/queries/useAuth';
 import { getRecentBlogs, getRemainingBlogs, clearBlogHistory, loadBlogHistoryFromDatabase, type BlogVisit } from '@/utils/blogHistory';
@@ -363,7 +362,6 @@ export default function Dashboard() {
         )}
       </div>
 
-      <VersionBadge />
     </Container>
   );
 }

@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
-import { VersionBadge } from '@/components/ui/VersionBadge';
 import { Container, Grid, GridItem } from '@/components/layouts';
 import { useSearch, useSearchSuggestions } from '@/hooks/queries/useSearch';
 import { searchFiltersAtom, type SearchFilters } from '@/store/search';
@@ -62,7 +61,7 @@ export default function Search() {
   // Detect if query is a blog name and handle navigation
   const handleSearch = (searchQuery: string) => {
     const trimmed = searchQuery.trim();
-    
+
     if (isBlogName(trimmed)) {
       // Remove @ if present
       const blogName = trimmed.startsWith('@') ? trimmed.slice(1) : trimmed;
@@ -104,7 +103,7 @@ export default function Search() {
       const blogs = data.pages
         .flatMap(page => page.items)
         .filter(isBlog);
-      
+
       if (blogs.length > 0) {
         preloadBlogImages(blogs);
       }
@@ -234,7 +233,7 @@ export default function Search() {
                                   />
                                 </div>
                               )}
-                              
+
                               <div className="space-y-3 p-4">
                                 {/* Blog avatar and info */}
                                 <div className="flex items-start gap-3">
@@ -359,8 +358,7 @@ export default function Search() {
           </div>
         )}
       </div>
-      
-      <VersionBadge />
+
     </Container>
   );
 }

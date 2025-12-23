@@ -5,6 +5,7 @@ import { Button } from './Button';
 import { NotesPanel, type Note } from './NotesPanel';
 import { useStoredImageData } from '@/hooks/useStoredImageData';
 import { effectiveSlideshowIntervalAtom, slideshowAutoplayAtom, slideshowFullscreenAtom } from '@/store/preferences';
+import { withProxy } from '@/utils/imageProxy';
 
 interface ImageViewerProps {
   isOpen: boolean;
@@ -51,7 +52,7 @@ export function ImageViewer({
   const [showImageText, setShowImageText] = useState(false); // Toggle text display with 't' key
   const [imageError, setImageError] = useState(false);
   const [imageRetryCount, setImageRetryCount] = useState(0);
-  
+
   // Slideshow settings
   const [effectiveInterval] = useAtom(effectiveSlideshowIntervalAtom);
   const [slideshowAutoplay] = useAtom(slideshowAutoplayAtom);
@@ -62,19 +63,19 @@ export function ImageViewer({
   const [showUI, setShowUI] = useState(true); // Toggle UI visibility
   const [uiTimeout, setUiTimeout] = useState<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
   // Use refs to store the latest callback values without causing effect re-runs
   const onNextRef = useRef(onNext);
   const onPreviousRef = useRef(onPrevious);
-  
+
   useEffect(() => {
     onNextRef.current = onNext;
     onPreviousRef.current = onPrevious;
   }, [onNext, onPrevious]);
-  
+
   // Check if this image is stored in database (to save API calls)
   const storedData = useStoredImageData(userId, postId, isOpen && !!userId && !!postId);
-  
+
   // Use stored notes if available, otherwise use provided notesList
   const displayNotes = storedData.isStored && storedData.notes ? storedData.notes : notesList;
 
@@ -197,7 +198,7 @@ export function ImageViewer({
     const progressInterval = setInterval(() => {
       const elapsed = Date.now() - startTime;
       const newProgress = (elapsed / duration) * 100;
-      
+
       if (newProgress >= 100) {
         if (onNextRef.current) {
           onNextRef.current();
@@ -222,7 +223,7 @@ export function ImageViewer({
     setImageRetryCount(0);
     setShowImageText(false); // Reset text display when image changes
   }, [currentIndex, imageUrl]);
-  
+
   // Handle image load errors (QUIC protocol errors, network issues, etc.)
   const handleImageError = useCallback((e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     const img = e.currentTarget;
@@ -231,7 +232,7 @@ export function ImageViewer({
       error: 'Failed to load image (possibly QUIC protocol error)',
       retryCount: imageRetryCount
     });
-    
+
     // Try retrying with HTTP/1.1 fallback (remove QUIC by forcing HTTP)
     if (imageRetryCount < 2) {
       const url = new URL(img.src);
@@ -307,8 +308,8 @@ export function ImageViewer({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div 
-          key="image-viewer-root" 
+        <div
+          key="image-viewer-root"
           ref={containerRef}
           className="fixed inset-0 z-50 flex items-center justify-center"
         >
@@ -333,7 +334,7 @@ export function ImageViewer({
           >
             {/* Top Controls */}
             {!isZoomed && showUI && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -359,7 +360,7 @@ export function ImageViewer({
                     </svg>
                   </div>
                 )}
-                
+
                 <div className="ml-auto flex items-center gap-2">
                   {/* Select button */}
                   {onToggleSelect && (
@@ -549,15 +550,14 @@ export function ImageViewer({
                 </div>
               ) : (
                 <img
-                  src={imageUrl}
+                  src={withProxy(imageUrl)}
                   alt="Full size"
-                  className={`${isZoomed ? 'cursor-zoom-out' : 'cursor-zoom-in'} ${
-                    isZoomed 
-                      ? 'min-h-screen min-w-full object-contain' 
-                      : isFullscreen 
+                  className={`${isZoomed ? 'cursor-zoom-out' : 'cursor-zoom-in'} ${isZoomed
+                    ? 'min-h-screen min-w-full object-contain'
+                    : isFullscreen
                       ? 'max-h-screen max-w-screen object-contain'
                       : 'max-h-[80vh] max-w-[90vw] rounded-lg object-contain'
-                  }`}
+                    }`}
                   onClick={handleImageClick}
                   onError={handleImageError}
                 />
@@ -621,46 +621,46 @@ export function ImageViewer({
                   {(() => {
                     // Sanitize HTML content: strip tags, convert links to readable text, remove image tags
                     let sanitized = imageText;
-                    
+
                     // Extract blog names from tumblr_blog links: <a class="tumblr_blog" href="...">blogname</a>
                     sanitized = sanitized.replace(/<a\s+class="tumblr_blog"[^>]*>([^<]+)<\/a>/gi, '$1');
-                    
+
                     // Extract text from other links: <a href="...">text</a> -> text
                     sanitized = sanitized.replace(/<a[^>]*>([^<]+)<\/a>/gi, '$1');
-                    
+
                     // Remove image tags completely (we're already showing the image)
                     sanitized = sanitized.replace(/<img[^>]*>/gi, '');
                     sanitized = sanitized.replace(/<figure[^>]*>.*?<\/figure>/gi, '');
-                    
+
                     // Convert blockquotes to indented text
                     sanitized = sanitized.replace(/<blockquote[^>]*>/gi, '');
                     sanitized = sanitized.replace(/<\/blockquote>/gi, '');
-                    
+
                     // Convert paragraph tags to line breaks
                     sanitized = sanitized.replace(/<p[^>]*>/gi, '');
                     sanitized = sanitized.replace(/<\/p>/gi, '\n');
-                    
+
                     // Convert div tags to line breaks
                     sanitized = sanitized.replace(/<div[^>]*>/gi, '');
                     sanitized = sanitized.replace(/<\/div>/gi, '\n');
-                    
+
                     // Convert br tags to line breaks
                     sanitized = sanitized.replace(/<br\s*\/?>/gi, '\n');
-                    
+
                     // Remove all remaining HTML tags
                     sanitized = sanitized.replace(/<[^>]+>/g, '');
-                    
+
                     // Decode HTML entities
                     const textarea = document.createElement('textarea');
                     textarea.innerHTML = sanitized;
                     sanitized = textarea.value;
-                    
+
                     // Clean up multiple line breaks
                     sanitized = sanitized.replace(/\n{3,}/g, '\n\n');
-                    
+
                     // Trim whitespace
                     sanitized = sanitized.trim();
-                    
+
                     return sanitized || 'No text content';
                   })()}
                 </div>
@@ -733,7 +733,7 @@ export function ImageViewer({
                     <span className="text-lg font-semibold">{blogId}</span>
                   </div>
                 )}
-                
+
                 {/* Spacer if no blog ID */}
                 {!blogId && <div />}
 

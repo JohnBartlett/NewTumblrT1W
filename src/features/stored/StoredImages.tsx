@@ -31,7 +31,6 @@ import { Container } from '@/components/layouts';
 import {
   Button,
   ImageViewer,
-  VersionBadge,
   SelectionToolbar,
   ImageFilters,
   ActionButtonGroup,
@@ -75,6 +74,7 @@ import {
   clearDownloadAtom,
   estimateTimeRemaining,
 } from '@/store/downloads';
+import { withProxy } from '@/utils/imageProxy';
 
 // Dynamic API URL based on current host
 const getApiUrl = () => {
@@ -603,16 +603,16 @@ export function StoredImages() {
     if (hasMore) {
       const totalAvailable = filterBlog
         ? stats.byBlog.find(b => b.blogName === filterBlog)?.count ||
-          images.length
+        images.length
         : stats.total;
       const currentlyLoaded = filteredAndSortedImages.length;
       const remaining = totalAvailable - currentlyLoaded;
 
       const shouldLoadAll = window.confirm(
         `You have ${currentlyLoaded} images loaded out of ${totalAvailable} total${filterBlog ? ` from @${filterBlog}` : ''}.\n\n` +
-          `Do you want to:\n` +
-          `• OK - Load all ${remaining} remaining images first, then select all ${totalAvailable}\n` +
-          `• Cancel - Just select the ${currentlyLoaded} images currently loaded`
+        `Do you want to:\n` +
+        `• OK - Load all ${remaining} remaining images first, then select all ${totalAvailable}\n` +
+        `• Cancel - Just select the ${currentlyLoaded} images currently loaded`
       );
 
       if (shouldLoadAll) {
@@ -878,7 +878,7 @@ export function StoredImages() {
     const totalAvailable = stats
       ? filterBlog
         ? stats.byBlog.find(b => b.blogName === filterBlog)?.count ||
-          filteredAndSortedImages.length
+        filteredAndSortedImages.length
         : stats.total
       : filteredAndSortedImages.length;
 
@@ -898,13 +898,13 @@ export function StoredImages() {
 
       const shouldLoadAll = window.confirm(
         `Download all ${totalAvailable} images from ${filterBlog ? `@${filterBlog}` : 'Stored'} to a folder?\n\n` +
-          `Currently loaded: ${currentlyLoaded}\n` +
-          `Need to load: ${remaining} more images\n\n` +
-          `This will:\n` +
-          `• Load all ${remaining} remaining images first\n` +
-          `• Then prompt you to select download location\n` +
-          `• Process images in batches of 20\n` +
-          `• Allow you to cancel at any time`
+        `Currently loaded: ${currentlyLoaded}\n` +
+        `Need to load: ${remaining} more images\n\n` +
+        `This will:\n` +
+        `• Load all ${remaining} remaining images first\n` +
+        `• Then prompt you to select download location\n` +
+        `• Process images in batches of 20\n` +
+        `• Allow you to cancel at any time`
       );
 
       if (!shouldLoadAll) {
@@ -1005,11 +1005,11 @@ export function StoredImages() {
     if (
       !window.confirm(
         `Download all ${count} images to folder "${folderName}"?\n\n` +
-          `Selected location: ${parentDirHandle.name}\n\n` +
-          `This will:\n` +
-          `• Process images in batches of 20\n` +
-          `• Take approximately ${Math.ceil(count / 20)} batches\n` +
-          `• Allow you to cancel at any time`
+        `Selected location: ${parentDirHandle.name}\n\n` +
+        `This will:\n` +
+        `• Process images in batches of 20\n` +
+        `• Take approximately ${Math.ceil(count / 20)} batches\n` +
+        `• Allow you to cancel at any time`
       )
     ) {
       log.info('StoredImages', 'User cancelled download confirmation');
@@ -1317,7 +1317,7 @@ export function StoredImages() {
     if (
       !window.confirm(
         `Download ${gridSelection.size} selected images to folder "${folderName}"?\n\n` +
-          `Selected location: ${parentDirHandle.name}`
+        `Selected location: ${parentDirHandle.name}`
       )
     ) {
       return;
@@ -1612,7 +1612,7 @@ export function StoredImages() {
               Showing {filteredAndSortedImages.length} of{' '}
               {filterBlog
                 ? stats.byBlog.find(b => b.blogName === filterBlog)?.count ||
-                  stats.total
+                stats.total
                 : stats.total}{' '}
               images
               {hasMore && (
@@ -1620,7 +1620,7 @@ export function StoredImages() {
                   (
                   {filterBlog
                     ? (stats.byBlog.find(b => b.blogName === filterBlog)
-                        ?.count || 0) - filteredAndSortedImages.length
+                      ?.count || 0) - filteredAndSortedImages.length
                     : stats.total - images.length}{' '}
                   more available)
                 </span>
@@ -1648,12 +1648,11 @@ export function StoredImages() {
                 <Button size="sm" onClick={loadAll} disabled={loadingMore}>
                   {loadingMore
                     ? 'Loading...'
-                    : `Load All (${
-                        filterBlog
-                          ? (stats.byBlog.find(b => b.blogName === filterBlog)
-                              ?.count || 0) - filteredAndSortedImages.length
-                          : stats.total - images.length
-                      })`}
+                    : `Load All (${filterBlog
+                      ? (stats.byBlog.find(b => b.blogName === filterBlog)
+                        ?.count || 0) - filteredAndSortedImages.length
+                      : stats.total - images.length
+                    })`}
                 </Button>
               </div>
             )}
@@ -1687,7 +1686,7 @@ export function StoredImages() {
               totalCount={
                 filterBlog
                   ? stats.byBlog.find(b => b.blogName === filterBlog)?.count ||
-                    filteredAndSortedImages.length
+                  filteredAndSortedImages.length
                   : filteredAndSortedImages.length
               }
               filterContext={filterBlog ? `from @${filterBlog}` : undefined}
@@ -1752,12 +1751,11 @@ export function StoredImages() {
                   <Button size="sm" onClick={loadAll} disabled={loadingMore}>
                     {loadingMore
                       ? 'Loading...'
-                      : `Load All (${
-                          filterBlog
-                            ? (stats.byBlog.find(b => b.blogName === filterBlog)
-                                ?.count || 0) - filteredAndSortedImages.length
-                            : stats.total - images.length
-                        })`}
+                      : `Load All (${filterBlog
+                        ? (stats.byBlog.find(b => b.blogName === filterBlog)
+                          ?.count || 0) - filteredAndSortedImages.length
+                        : stats.total - images.length
+                      })`}
                   </Button>
                 </ActionButtonGroup>
               )}
@@ -1893,7 +1891,7 @@ export function StoredImages() {
                     Delete All{filterBlog ? ` ${filterBlog}` : ''} (
                     {filterBlog
                       ? stats.byBlog.find(b => b.blogName === filterBlog)
-                          ?.count || 0
+                        ?.count || 0
                       : stats.total}
                     )
                   </Button>
@@ -1903,9 +1901,8 @@ export function StoredImages() {
 
             {/* Filters */}
             <div
-              className={`bg-white dark:bg-gray-800 ${
-                isFilterSticky ? 'sticky top-16 z-40' : 'relative'
-              } rounded-lg border border-gray-200 p-4 shadow-sm transition-all dark:border-gray-800`}
+              className={`bg-white dark:bg-gray-800 ${isFilterSticky ? 'sticky top-16 z-40' : 'relative'
+                } rounded-lg border border-gray-200 p-4 shadow-sm transition-all dark:border-gray-800`}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
@@ -1925,11 +1922,10 @@ export function StoredImages() {
                 {/* Sticky Toggle Button */}
                 <button
                   onClick={() => setIsFilterSticky(!isFilterSticky)}
-                  className={`flex-shrink-0 rounded-lg p-2 transition-colors ${
-                    isFilterSticky
-                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-                  }`}
+                  className={`flex-shrink-0 rounded-lg p-2 transition-colors ${isFilterSticky
+                    ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                    }`}
                   title={
                     isFilterSticky
                       ? 'Unlock filters (scroll with page)'
@@ -2009,11 +2005,10 @@ export function StoredImages() {
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: index * 0.01 }}
-                        className={`group relative aspect-square cursor-pointer overflow-hidden rounded ${
-                          isFocused
-                            ? 'ring-2 ring-primary-500 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-900'
-                            : ''
-                        } ${isRangeStart ? 'ring-4 ring-yellow-400 ring-offset-2' : ''}`}
+                        className={`group relative aspect-square cursor-pointer overflow-hidden rounded ${isFocused
+                          ? 'ring-2 ring-primary-500 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-900'
+                          : ''
+                          } ${isRangeStart ? 'ring-4 ring-yellow-400 ring-offset-2' : ''}`}
                         onClick={e => {
                           // Range Mode (mobile-friendly)
                           if (rangeMode) {
@@ -2063,11 +2058,10 @@ export function StoredImages() {
                         }}
                       >
                         <img
-                          src={image.url}
+                          src={withProxy(image.url)}
                           alt={image.description || 'Stored image'}
-                          className={`h-full w-full object-cover transition-transform ${
-                            isSelected ? 'scale-95' : 'group-hover:scale-105'
-                          }`}
+                          className={`h-full w-full object-cover transition-transform ${isSelected ? 'scale-95' : 'group-hover:scale-105'
+                            }`}
                         />
 
                         {/* Selection overlay */}
@@ -2077,25 +2071,22 @@ export function StoredImages() {
 
                         {/* Hover overlay */}
                         <div
-                          className={`absolute inset-0 bg-black/0 transition-colors ${
-                            !isSelected && 'group-hover:bg-black/20'
-                          }`}
+                          className={`absolute inset-0 bg-black/0 transition-colors ${!isSelected && 'group-hover:bg-black/20'
+                            }`}
                         />
 
                         {/* Checkbox - Always visible when selected */}
                         <div
-                          className={`absolute left-2 top-2 transition-opacity ${
-                            isSelected
-                              ? 'opacity-100'
-                              : 'opacity-0 group-hover:opacity-100'
-                          }`}
+                          className={`absolute left-2 top-2 transition-opacity ${isSelected
+                            ? 'opacity-100'
+                            : 'opacity-0 group-hover:opacity-100'
+                            }`}
                         >
                           <div
-                            className={`flex h-6 w-6 cursor-pointer items-center justify-center rounded border-2 transition-all hover:scale-110 ${
-                              isSelected
-                                ? 'border-primary-500 bg-primary-500 shadow-lg'
-                                : 'border-white bg-white/20 backdrop-blur-sm hover:bg-white/40'
-                            }`}
+                            className={`flex h-6 w-6 cursor-pointer items-center justify-center rounded border-2 transition-all hover:scale-110 ${isSelected
+                              ? 'border-primary-500 bg-primary-500 shadow-lg'
+                              : 'border-white bg-white/20 backdrop-blur-sm hover:bg-white/40'
+                              }`}
                             onClick={e => {
                               e.stopPropagation();
 
@@ -2234,7 +2225,6 @@ export function StoredImages() {
           )}
         </AnimatePresence>
 
-        <VersionBadge />
       </div>
     </Container>
   );

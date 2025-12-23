@@ -114,7 +114,7 @@ export function setAuthCookies(res: Response, tokens: TokenPair) {
   res.cookie('accessToken', tokens.accessToken, {
     httpOnly: true,
     secure: isProduction, // HTTPS only in production
-    sameSite: 'strict',
+    sameSite: 'lax',
     maxAge: 15 * 60 * 1000, // 15 minutes
     path: '/',
   });
@@ -123,7 +123,7 @@ export function setAuthCookies(res: Response, tokens: TokenPair) {
   res.cookie('refreshToken', tokens.refreshToken, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'strict',
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/api/auth', // Only sent to auth endpoints
   });
@@ -194,7 +194,7 @@ export function requireRole(...roles: string[]) {
  */
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Limit each IP to 1000 requests per windowMs (Internal API)
+  max: 2000, // Limit each IP to 2000 requests per windowMs (Increased to prevent VersionBadge 429s)
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -254,9 +254,9 @@ export function getHelmetConfig() {
  * CORS configuration for production
  */
 export function getCorsOptions() {
-  const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : ['http://localhost:5173'];
+  const envOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
+  const defaultOrigins = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173'];
+  const allowedOrigins = [...new Set([...envOrigins, ...defaultOrigins])];
 
   return {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {

@@ -453,6 +453,74 @@ app.get('/api/tumblr/blog/:blogIdentifier/avatar', async (req, res) => {
   }
 });
 
+/**
+ * General Image Proxy
+ * Used to bypass net::ERR_CONNECTION_CLOSED and CORS issues with Tumblr media
+ */
+app.get('/api/tumblr/image-proxy', async (req, res) => {
+  const imageUrl = req.query.url as string;
+
+  if (!imageUrl) {
+    return res.status(400).json({ error: 'URL parameter is required' });
+  }
+
+  // Security check: only allow images from Tumblr or other approved domains
+  const allowedHosts = [
+    'media.tumblr.com',
+    '64.media.tumblr.com',
+    'assets.tumblr.com',
+    'va.media.tumblr.com',
+    'at.tumblr.com'
+  ];
+
+  try {
+    const url = new URL(imageUrl);
+    if (!allowedHosts.some(host => url.hostname.endsWith(host))) {
+      return res.status(403).json({ error: 'Domain not allowed' });
+    }
+
+    console.log(`[Proxy] 🖼️ Proxying image: ${imageUrl.substring(0, 60)}...`);
+
+    const response = await fetch(imageUrl, {
+      headers: {
+        'Referer': 'https://www.tumblr.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`[Proxy] ❌ Failed to fetch image: ${response.status} ${response.statusText}`);
+      return res.status(response.status).send('Failed to fetch image');
+    }
+
+    // Forward content type and length
+    const contentType = response.headers.get('content-type');
+    const contentLength = response.headers.get('content-length');
+
+    if (contentType) res.setHeader('Content-Type', contentType);
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+
+    // Cache for 30 days
+    res.setHeader('Cache-Control', 'public, max-age=2592000');
+
+    // Stream the body instead of loading it all into memory
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+      res.end();
+    } else {
+      res.status(500).send('Empty response body');
+    }
+  } catch (error) {
+    console.error('[Proxy] 💥 Image proxy error:', error);
+    res.status(500).json({ error: 'Failed to proxy image' });
+  }
+});
+
 app.get('/api/tumblr/blog/:blogIdentifier/info', async (req, res) => {
   try {
     const { blogIdentifier } = req.params;
@@ -1367,11 +1435,13 @@ app.post('/api/auth/refresh', async (req, res) => {
     const refreshToken = req.cookies.refreshToken;
 
     if (!refreshToken) {
+      console.log('[Auth] ℹ️  Refresh skipped: No refresh token cookie present');
       return res.status(401).json({ error: 'No refresh token' });
     }
 
     const payload = verifyRefreshToken(refreshToken);
     if (!payload) {
+      console.warn('[Auth] ⚠️  Refresh failed: Invalid or expired refresh token');
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
 

@@ -22,8 +22,8 @@ export function VersionBadge() {
     // Fetch API stats initially
     fetchApiStats();
 
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchApiStats, 30000);
+    // Refresh every 60 seconds
+    const interval = setInterval(fetchApiStats, 60000);
 
     return () => clearInterval(interval);
   }, []);
@@ -78,9 +78,9 @@ export function VersionBadge() {
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-mono text-gray-400">Remaining</span>
                     <span className={`text-xs font-mono font-semibold ${apiStats.remaining > 100 ? 'text-green-400' :
-                        apiStats.remaining > 50 ? 'text-yellow-400' :
-                          apiStats.remaining > 10 ? 'text-orange-400' :
-                            'text-red-400'
+                      apiStats.remaining > 50 ? 'text-yellow-400' :
+                        apiStats.remaining > 10 ? 'text-orange-400' :
+                          'text-red-400'
                       }`}>
                       {apiStats.remaining.toLocaleString()}
                     </span>
@@ -90,9 +90,9 @@ export function VersionBadge() {
                 <div className="w-full bg-gray-700 rounded-full h-1.5 overflow-hidden">
                   <div
                     className={`h-full transition-all duration-300 ${apiStats.percentage < 50 ? 'bg-green-500' :
-                        apiStats.percentage < 75 ? 'bg-yellow-500' :
-                          apiStats.percentage < 90 ? 'bg-orange-500' :
-                            'bg-red-500'
+                      apiStats.percentage < 75 ? 'bg-yellow-500' :
+                        apiStats.percentage < 90 ? 'bg-orange-500' :
+                          'bg-red-500'
                       }`}
                     style={{ width: `${Math.min(apiStats.percentage, 100)}%` }}
                   />
@@ -124,9 +124,9 @@ export function VersionBadge() {
               {apiStats.remaining !== null ? (
                 // Show remaining if we have real Tumblr data
                 <span className={`text-xs font-mono font-semibold ${apiStats.remaining > 100 ? 'text-green-400' :
-                    apiStats.remaining > 50 ? 'text-yellow-400' :
-                      apiStats.remaining > 10 ? 'text-orange-400' :
-                        'text-red-400'
+                  apiStats.remaining > 50 ? 'text-yellow-400' :
+                    apiStats.remaining > 10 ? 'text-orange-400' :
+                      'text-red-400'
                   }`}>
                   {apiStats.remaining} left
                 </span>

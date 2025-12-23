@@ -2,7 +2,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import { motion } from 'framer-motion';
-import { Card, Button, ImageViewer, NotesPanel, MetadataPanel, VersionBadge, SelectionToolbar, ImageFilters, type ImageFiltersState } from '@/components/ui';
+import { Card, Button, ImageViewer, NotesPanel, MetadataPanel, SelectionToolbar, ImageFilters, type ImageFiltersState } from '@/components/ui';
 import { startOperationAtom, updateOperationProgressAtom, endOperationAtom } from '@/store/operations';
 import type { Note } from '@/components/ui/NotesPanel';
 import { downloadImagesServerSide, canShareFiles, getImageFilename, type ImageMetadata } from '@/utils/imageDownload';
@@ -12,6 +12,7 @@ import { useTumblrBlog } from '@/hooks/useTumblrBlog';
 // import { getTumblrConnectionStatus } from '@/services/api';
 // import { trackBlogVisit } from '@/utils/blogHistory';
 import { getStoredDirectoryHandle } from '@/utils/downloadDirectory';
+import { withProxy } from '@/utils/imageProxy';
 
 // Dynamic API URL based on current host
 const getApiUrl = () => {
@@ -2124,7 +2125,7 @@ export function Blog() {
                             style={{ width: '100%', height: '100%' }}
                           >
                             <img
-                              src={post.images![0]}
+                              src={withProxy(post.images![0])}
                               alt="Post content"
                               className={`h-full w-full object-cover transition-transform ${isSelected ? 'scale-95' : 'group-hover:scale-105'
                                 }`}
@@ -2257,7 +2258,7 @@ export function Blog() {
                       <div className="p-3 sm:p-6">
                         <div className="mb-2 flex items-center space-x-2 sm:mb-4 sm:space-x-3">
                           <img
-                            src={blogData.avatar}
+                            src={withProxy(blogData.avatar)}
                             alt={blogData.username}
                             className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-700 sm:h-10 sm:w-10"
                           />
@@ -2273,7 +2274,7 @@ export function Blog() {
 
                         {post.images && post.images.length > 0 && (
                           <img
-                            src={post.images[0]}
+                            src={withProxy(post.images[0])}
                             alt="Post content"
                             className="mb-2 w-full cursor-pointer rounded-lg transition-transform active:scale-[0.98] sm:mb-4 sm:hover:scale-[1.02]"
                             onClick={() => setSelectedImage(post)}
@@ -2622,7 +2623,6 @@ export function Blog() {
         )
         }
 
-        <VersionBadge />
       </div >
     </div >
   );

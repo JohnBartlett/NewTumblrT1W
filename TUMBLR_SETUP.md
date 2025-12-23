@@ -200,7 +200,7 @@ If you encounter issues:
 5. Restart dev server completely
 6. Hard refresh browser
 
-**Current Version**: v0.10.4
+**Current Version**: v1.3.1
 
 ## Security Notes
 

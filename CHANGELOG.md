@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.1] - 2025-12-23
+
+### Fixed
+- **React Duplicate Key Warning**: Implemented de-duplication in the `useTumblrBlog` hook to prevent "duplicate key" errors in the image grid.
+- **API Rate Limiting**: Increased server-side API rate limit to 2,000 requests per 15-minute window to accommodate high-frequency telemetry requests.
+- **Admin Dashboard Console Error**: Resolved a duplicate `Button` import in the Admin component.
+
+### Changed
+- **Telemetry Polling Optimization**: Reduced polling frequency for API statistics from 30 seconds to 60 seconds (60,000ms) in `VersionBadge` and `Admin` components to minimize background network traffic.
+- **UI Consolidation**: Unified the `VersionBadge` component by moving it to the `RootLayout`, ensuring consistent visibility and reducing redundant component instances across the app.
+
+---
+
 ## [Unreleased]
 
 ### v1.0.0 - Major Refactoring (Planned)

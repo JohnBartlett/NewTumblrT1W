@@ -1,5 +1,32 @@
 # Version History
 
+## v1.3.1 (December 23, 2025) - API Reliability & UI Stabilization 🔧
+
+### 🎯 Major Improvements
+
+#### API Rate Limit Enhancement
+- **Increased Threshold**: Raised server-side rate limit from 1,000 to **2,000 requests per 15-minute window**.
+- **Context**: Prevents `429 Too Many Requests` errors when multiple components (Dashboard, Admin, VersionBadge) perform background telemetry polling.
+
+#### Telemetry Polling Optimization
+- **Reduced Frequency**: Polling interval for API usage statistics increased from 30s to **60s**.
+- **Admin Optimization**: Admin dashboard polling frequency reduced from 10s to **60s** to decrease backend load.
+
+#### UI Architecture Consolidation
+- **Unified VersionBadge**: Centralized the `VersionBadge` in `RootLayout`.
+- **Cleanup**: Removed redundant/duplicate badge instances from Dashboard, StoredImages, Settings, Search, Blog, and Admin features.
+- **Consistent UX**: One source of truth for app version and API quota across all navigation states.
+
+#### Duplicate Key Prevention
+- **Robust Mapping**: Implemented automated filtering in `useTumblrBlog` hook (`loadMore`, `loadMultiple`, `loadAll`).
+- **Fix**: Prevents "duplicate key" React warnings in the blog image grid by ensuring newly fetched posts don't overlap with existing IDs in state.
+
+### 🔧 Technical Fixes
+- Removed duplicate `Button` import in `Admin.tsx`.
+- Updated `useTumblrBlog` to use internal ID tracking for batch loads.
+
+---
+
 ## v1.1.0 (November 24, 2025) - Rate Limiting & API Monitoring 🚦
 
 ### 🎯 Major Features

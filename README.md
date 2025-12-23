@@ -39,12 +39,11 @@ A modern, feature-rich Tumblr client built with React, TypeScript, and Vite, fol
 - ✅ **Progress Tracking** - Real-time feedback during operations
 - ✅ **Smart Confirmations** - Prevents accidental bulk actions
 
-### API Quota Optimization (v0.81.0)
-- ⚡ **Smart Database-First Loading** - Checks stored database before making API calls
-- ⚡ **Zero API Calls for Stored Images** - View your collection unlimited times
-- ⚡ **Visual Indicator** - ⚡ badge shows when notes loaded from database
-- ⚡ **Automatic Optimization** - Works transparently in ImageViewer
-- ⚡ **Console Logging** - Track API calls saved in DevTools
+### API Stability & Optimization (v1.3.1)
+- ⚡ **Increased Rate Limits** - Backend threshold raised to 2,000 requests per 15m
+- ⚡ **Optimized Polling** - Reduced background telemetry frequency to conserve quota
+- ⚡ **De-duplicated Views** - Prevention of React key warnings in infinite grids
+- ⚡ **Unified Version Tracking** - Centralized monitoring badge in RootLayout
 
 ### Notes Storage & Pagination (v0.80.0)
 - ✅ **Store Real Notes** - Save actual likes, reblogs, comments with images
